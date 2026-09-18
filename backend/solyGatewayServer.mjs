@@ -9,6 +9,9 @@ import { persistWorkspaceAsset, readWorkspaceAsset, createProjectVersion, restor
 import { runVisionQa } from './visionQaAdapter.mjs';
 import { renderTimeline } from './frameRenderer.mjs';
 import { buildLipSyncPlan } from './lipSyncPlanner.mjs';
+import { createWorkSession, getWorkSession, checkpointWork, summarizeWorkSession } from './workContinuity.mjs';
+import { selectModel } from './modelRouter.mjs';
+import { evaluateEducationalPlan } from './educationPolicy.mjs';
 import { durableConfigured, durableGet, durablePut, durableBlobGet } from './durableStore.mjs';
 import { handler as appdeployCompatHandler } from './appdeployCompatApi.mjs';
 
@@ -37,6 +40,11 @@ const githubRepo=()=>`${requireEnv('SOLY_REPO_OWNER','GitHub repo owner')}/${req
 async function githubJson(path,options={}){return fetchJson(`https://api.github.com/repos/${githubRepo()}${path}`,{...options,headers:{...githubHeaders(),...(options.headers||{})}});}
 
 const adapters={
+  'soly.work.session.create':async args=>{const session=await createWorkSession(args);return{adapter:'internal-work-continuity',session,summary:summarizeWorkSession(session)};},
+  'soly.work.session.read':async args=>{const session=await getWorkSession(args.sessionId||'active');if(!session)throw new GatewayError('not_found','Work session not found',404);return{adapter:'internal-work-continuity',session,summary:summarizeWorkSession(session)};},
+  'soly.work.checkpoint':async args=>({adapter:'internal-work-continuity',...await checkpointWork(args)}),
+  'soly.model.route':async args=>({adapter:'internal-model-router',...selectModel(args)}),
+  'toto.education.review':async args=>({adapter:'internal-education-policy',...evaluateEducationalPlan(args)}),
   ...createAccountAdapters(),
   'workspace.asset.read':async args=>readWorkspaceAsset(args),
   'workspace.asset.persist':async args=>persistWorkspaceAsset(args),
