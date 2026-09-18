@@ -839,7 +839,7 @@ export const handler = router({
       });
       const plan = extractText(result);
       if (!plan) throw new Error('plan_missing');
-      return json({ plan, model, educationalPolicy: { passed: true, learningObjective: learningGoal, requirements: ['interactive-question','recap','originality'] } });
+      return json({ plan, model, educationalPolicy: { preflightPassed: true, fullReviewRequiredBeforeExport: true, learningObjective: learningGoal, requirements: ['interactive-question','recap','originality'] } });
     } catch (caught) {
       console.warn('Episode plan failed', (caught as any)?.status || 'unknown');
       return externalError(caught);
