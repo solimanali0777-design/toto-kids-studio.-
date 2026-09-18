@@ -6,6 +6,12 @@ export const TOOL_CONTRACTS={
   'workspace.project.restore':{version:'1.0.0',riskLevel:'L3',allowedScopes:['project:workspace:restore'],requiresConfirmation:true,idempotent:true,timeoutMs:60000,allowedTargets:['workspace-storage'],allowedArgs:['workspaceId','projectId','versionId']},
 
 
+  'soly.work.session.create':{version:'1.0.0',riskLevel:'L1',allowedScopes:['project:work:write'],requiresConfirmation:false,idempotent:true,timeoutMs:5000,allowedTargets:['internal'],allowedArgs:['sessionId','goal','tasks']},
+  'soly.work.session.read':{version:'1.0.0',riskLevel:'L0',allowedScopes:['project:work:read'],requiresConfirmation:false,idempotent:true,timeoutMs:5000,allowedTargets:['internal'],allowedArgs:['sessionId']},
+  'soly.work.checkpoint':{version:'1.0.0',riskLevel:'L1',allowedScopes:['project:work:write'],requiresConfirmation:false,idempotent:true,timeoutMs:5000,allowedTargets:['internal'],allowedArgs:['sessionId','taskId','status','note','blocker','alternatives','nextAction']},
+  'soly.model.route':{version:'1.0.0',riskLevel:'L0',allowedScopes:['project:ai:route'],requiresConfirmation:false,idempotent:true,timeoutMs:3000,allowedTargets:['internal'],allowedArgs:['catalog','requiredCapabilities','budgetUsd','maxLatencyMs','quality','preferredProviders','requirePrivate']},
+  'toto.education.review':{version:'1.0.0',riskLevel:'L0',allowedScopes:['project:education:review'],requiresConfirmation:false,idempotent:true,timeoutMs:3000,allowedTargets:['internal'],allowedArgs:['learningObjective','ageBand','teachingMethod','recap','interaction','originalityNote','facts','riskyClaims','copiedElements']},
+
   'vision.qa.execute':{version:'1.0.0',riskLevel:'L2',allowedScopes:['project:vision:qa'],requiresConfirmation:'when_paid',idempotent:true,timeoutMs:90000,allowedTargets:['generativelanguage.googleapis.com'],allowedArgs:['workspaceId','projectId','assetId','versionId','characterIds']},
   'render.composer.execute':{version:'1.0.0',riskLevel:'L2',allowedScopes:['project:render:execute'],requiresConfirmation:false,idempotent:true,timeoutMs:180000,allowedTargets:['local-render-worker'],allowedArgs:['workspaceId','projectId','timeline','outputName','fps','width','height']},
   'lipsync.plan.generate':{version:'1.0.0',riskLevel:'L1',allowedScopes:['project:lipsync:plan'],requiresConfirmation:false,idempotent:true,timeoutMs:10000,allowedTargets:['internal'],allowedArgs:['transcript','durationMs','wordTimings','language']},
