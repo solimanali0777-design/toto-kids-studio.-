@@ -18,6 +18,7 @@ type LyricsReview = { kidSafe?: boolean; learningClarity?: number; memorability?
 type DialectVariant = { dialectKey?: string; label?: string; text?: string; notes?: string };
 type SafetyReview = { score?: number; passed?: boolean; risks?: string[]; strengths?: string[]; fixes?: string[]; learningIntegrity?: string; privacyRisk?: boolean; commercialPressure?: boolean };
 type Postmortem = { summary?: string; wins?: string[]; problems?: string[]; nextTest?: string; caution?: string; operations?: string[] };
+type OwnerAuthStatus = { configured?: boolean; disabled?: boolean; authenticated?: boolean };
 type WorkSummary = {
   sessionId?: string;
   goal?: string;
@@ -98,6 +99,8 @@ function App() {
   const [experiment, setExperiment] = useState('فرضية واحدة: تغيير اللهجة فقط مع تثبيت الفكرة والطول والجودة');
   const [growthNotes, setGrowthNotes] = useState('');
   const [postmortem, setPostmortem] = useState<Postmortem | null>(null);
+  const [ownerAuth, setOwnerAuth] = useState<OwnerAuthStatus | null>(null);
+  const [ownerTokenInput, setOwnerTokenInput] = useState('');
   const [focusGoal, setFocusGoal] = useState(() => loadJson('toto_focus_goal_v1', 'تطوير Toto Kids Studio بدون فقدان السياق، مع اجتياز الاختبارات قبل الدمج'));
   const [workSummary, setWorkSummary] = useState<WorkSummary | null>(null);
   const [focusBlocker, setFocusBlocker] = useState('');
@@ -176,6 +179,7 @@ function App() {
   useEffect(() => { localStorage.setItem('toto_safety_v4', JSON.stringify(safetyChecks)); }, [safetyChecks]);
   useEffect(() => { localStorage.setItem('toto_qa_v4', JSON.stringify(qaChecks)); }, [qaChecks]);
   useEffect(() => { localStorage.setItem('toto_growth_v4', JSON.stringify(growth)); }, [growth]);
+  useEffect(() => { void checkOwnerAuth(); }, []);
   useEffect(() => { localStorage.setItem('toto_focus_goal_v1', JSON.stringify(focusGoal)); }, [focusGoal]);
   useEffect(() => { if (tab === 'control') void loadFocusStatus(); }, [tab]);
   useEffect(() => {
@@ -227,6 +231,43 @@ function App() {
 
   function showError(_value: unknown) {
     setMessage('تعذر التنفيذ');
+  }
+
+  async function checkOwnerAuth() {
+    try {
+      const { data } = await api.authStatus();
+      setOwnerAuth(data as OwnerAuthStatus);
+    } catch {
+      setOwnerAuth({ configured: false, disabled: false, authenticated: false });
+    }
+  }
+
+  async function loginOwner() {
+    if (!ownerTokenInput.trim()) { setMessage('اكتب Owner Token.'); return; }
+    setLoading('owner-login'); setMessage('');
+    try {
+      await api.login(ownerTokenInput.trim());
+      setOwnerTokenInput('');
+      await checkOwnerAuth();
+      setMessage('تم فتح جلسة المالك بأمان.');
+    } catch (caught) {
+      showError(caught);
+    } finally {
+      setLoading('');
+    }
+  }
+
+  async function logoutOwner() {
+    setLoading('owner-logout'); setMessage('');
+    try {
+      await api.logout();
+      await checkOwnerAuth();
+      setMessage('تم قفل جلسة المالك.');
+    } catch (caught) {
+      showError(caught);
+    } finally {
+      setLoading('');
+    }
   }
 
   async function loadFocusStatus() {
@@ -619,14 +660,23 @@ function App() {
   return (
     <main className='shell'>
       <header className='hero'>
-        <div className='brand-mark'><img src='./icon.svg' alt='شعار صوت توتو' /></div>
+        <div className='brand-mark'><img src='./icon.svg' alt='شعار Toto Kids Studio' /></div>
         <div className='hero-copy'>
           <p className='eyebrow'>TOTO KIDS STUDIO</p>
-          <h1>صوت توتو <span>6.0</span></h1>
-          <p>صوت مصري طبيعي وإنتاج بسيط في مكان واحد.</p>
+          <h1>Toto Kids Studio <span>7.15 Alpha</span></h1>
+          <p>إنتاج أطفال مصري متكامل، مع Soly Focus وحماية جلسة المالك.</p>
         </div>
         {installPrompt && <button className='install' onClick={installApp}>📲 تثبيت</button>}
       </header>
+
+      {ownerAuth && !ownerAuth.authenticated && <section className='panel'>
+        <div className='section-head'><div><p className='kicker'>OWNER SESSION</p><h2>حماية مفاتيح التوليد والحسابات</h2></div><span className='badge hot'>مقفول</span></div>
+        {!ownerAuth.configured && !ownerAuth.disabled ? <p className='hint'>السيرفر محتاج متغير <code>SOLY_OWNER_TOKEN</code> قبل أي تشغيل إنتاجي لـ7.15. لحد ما يتظبط، التوليد والأدوات الحساسة مقفولة افتراضيًا.</p> : <>
+          <p className='hint'>اكتب Owner Token مرة واحدة. السيرفر يحوله لجلسة HttpOnly؛ التوكن نفسه لا يتحفظ في LocalStorage.</p>
+          <div className='action-row'><input type='password' value={ownerTokenInput} onChange={event => setOwnerTokenInput(event.target.value)} placeholder='Owner Token' autoComplete='current-password' /><button className='primary' disabled={Boolean(loading)} onClick={loginOwner}>🔐 فتح جلسة المالك</button></div>
+        </>}
+      </section>}
+      {ownerAuth?.authenticated && !ownerAuth.disabled && <div className='action-row'><span className='badge good-badge'>🔒 جلسة المالك مفتوحة</span><button className='mini' disabled={Boolean(loading)} onClick={logoutOwner}>قفل الجلسة</button></div>}
 
       <nav className='tabs'>
         {tabs.map(item => <button key={item.id} className={tab === item.id ? 'tab active' : 'tab'} onClick={() => { setTab(item.id); setMessage(''); }}>{item.icon}<span>{item.label}</span></button>)}
