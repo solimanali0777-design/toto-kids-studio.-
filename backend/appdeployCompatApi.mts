@@ -195,26 +195,39 @@ async function candidateModels(apiKey: string, kind: ModelKind, preferred: strin
   }
 }
 
-async function postGemini(apiKey: string, model: string, payload: unknown, version = 'v1beta') {
+async function postGemini(
+  apiKey: string,
+  model: string,
+  payload: unknown,
+  version = 'v1beta',
+  timeoutMs = 40000,
+  maxAttempts = 3,
+) {
   const endpoint = `https://generativelanguage.googleapis.com/${version}/models/${model}:generateContent`;
   let lastStatus = 500;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  const attempts = Math.min(4, Math.max(1, Math.round(maxAttempts)));
+  const requestTimeout = Math.min(60000, Math.max(5000, Math.round(timeoutMs)));
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(requestTimeout),
       });
       lastStatus = response.status;
       if (response.ok) return response.json() as Promise<any>;
-      if (!retryableStatuses.has(response.status) || attempt === 3) break;
+      if (!retryableStatuses.has(response.status) || attempt === attempts - 1) break;
       const retryAfter = Number(response.headers.get('retry-after') || 0);
-      const delay = retryAfter > 0 ? retryAfter * 1000 : Math.min(8000, 650 * (2 ** attempt) + Math.floor(Math.random() * 450));
+      const delay = retryAfter > 0
+        ? Math.min(12000, retryAfter * 1000)
+        : Math.min(6000, 700 * (2 ** attempt) + Math.floor(Math.random() * 450));
       await sleep(delay);
-    } catch {
-      lastStatus = 503;
-      if (attempt === 3) break;
-      await sleep(Math.min(8000, 650 * (2 ** attempt) + Math.floor(Math.random() * 450)));
+    } catch (caught) {
+      lastStatus = (caught as { name?: string })?.name === 'TimeoutError' ? 504 : 503;
+      if (attempt === attempts - 1) break;
+      await sleep(Math.min(6000, 700 * (2 ** attempt) + Math.floor(Math.random() * 450)));
     }
   }
   const failure = new Error(`gemini_http_${lastStatus}`);
@@ -244,7 +257,7 @@ async function postTextGemini(apiKey: string, payload: unknown) {
   let lastError: unknown = null;
   for (const model of models) {
     try {
-      const result = await postGemini(apiKey, model, payload);
+      const result = await postGemini(apiKey, model, payload, 'v1beta', 18000, 2);
       return { result, model };
     } catch (caught) {
       lastError = caught;
@@ -313,6 +326,63 @@ async function generateChildPcm(apiKey: string, body: TtsBody) {
   throw lastError || new Error('tts_recovery_failed');
 }
 
+function emergencyMusicWavBase64(seedText: string, durationSeconds = 18, mood = 'cheerful') {
+  const sampleRate = 22050;
+  const duration = Math.min(30, Math.max(8, Math.round(durationSeconds)));
+  const sampleCount = sampleRate * duration;
+  const pcm = Buffer.alloc(sampleCount * 2);
+  const seedSource = `${seedText}|${mood}`;
+  let seed = 2166136261;
+  for (let i = 0; i < seedSource.length; i += 1) {
+    seed ^= seedSource.charCodeAt(i);
+    seed = Math.imul(seed, 16777619) >>> 0;
+  }
+  const random = () => {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+    return (seed >>> 0) / 0xffffffff;
+  };
+  const scale = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25];
+  const bright = /مبهج|مرح|cheer|happy|play|bounce|dance/i.test(mood);
+  const bpm = bright ? 118 : 96;
+  const beatSeconds = 60 / bpm;
+  const notesPerBeat = 1;
+  const noteSeconds = beatSeconds / notesPerBeat;
+  const motif = Array.from({ length: 16 }, (_, index) => {
+    const base = index % 4 === 0 ? 0 : Math.floor(random() * scale.length);
+    return scale[Math.min(scale.length - 1, base)];
+  });
+
+  for (let i = 0; i < sampleCount; i += 1) {
+    const t = i / sampleRate;
+    const noteIndex = Math.floor(t / noteSeconds) % motif.length;
+    const noteT = t % noteSeconds;
+    const frequency = motif[noteIndex];
+    const attack = Math.min(1, noteT / 0.02);
+    const release = Math.min(1, (noteSeconds - noteT) / 0.08);
+    const env = Math.max(0, Math.min(attack, release));
+    const sine = Math.sin(2 * Math.PI * frequency * t);
+    const harmonic = Math.sin(2 * Math.PI * frequency * 2 * t) * 0.22;
+    const bassFreq = scale[(noteIndex + 2) % 3] / 2;
+    const bass = Math.sin(2 * Math.PI * bassFreq * t) * 0.22;
+    const beatPos = t % beatSeconds;
+    const kickEnv = Math.max(0, 1 - beatPos / 0.09);
+    const kick = Math.sin(2 * Math.PI * (70 - 25 * (beatPos / 0.09)) * t) * kickEnv * 0.26;
+    const clapPhase = (t + beatSeconds / 2) % beatSeconds;
+    const clapEnv = clapPhase < 0.045 ? (1 - clapPhase / 0.045) : 0;
+    const noise = (random() * 2 - 1) * clapEnv * 0.07;
+    const masterFade = Math.min(1, t / 0.25, (duration - t) / 0.45);
+    const value = (sine * 0.42 + harmonic + bass + kick + noise) * env * Math.max(0, masterFade);
+    const sample = Math.max(-1, Math.min(1, value));
+    pcm.writeInt16LE(Math.round(sample * 32767), i * 2);
+  }
+  return {
+    wavBase64: pcmToWavBase64(pcm.toString('base64'), sampleRate, 1, 16),
+    sampleRate,
+    durationSeconds: duration,
+    bpm,
+  };
+}
+
 function pcmToWavBase64(pcmBase64: string, sampleRate = 24000, channels = 1, bitDepth = 16) {
   const pcm = Buffer.from(pcmBase64, 'base64');
   const header = Buffer.alloc(44);
@@ -373,7 +443,7 @@ export const handler = router({
           music: names.includes('lyria-3.5') ? 'lyria-3.5' : names.find((name: string) => name.includes('lyria')) || null,
           video: names.includes('veo-3.1-lite-generate-preview') ? 'veo-3.1-lite-generate-preview' : names.find((name: string) => name.includes('veo')) || null,
         },
-        resilience: { platformTextFallback: true, platformImageFallback: true, browserVoiceFallback: true, retryLayers: 4, dynamicModelRouting: true },
+        resilience: { platformTextFallback: false, platformImageFallback: false, alternateGeminiModels: true, localEmergencyMusic: true, browserVoicePreviewFallback: true, retryLayers: 3, dynamicModelRouting: true },
       });
     } catch (caught) {
       console.warn('Capabilities failed', (caught as any)?.status || 'unknown');
@@ -601,9 +671,27 @@ export const handler = router({
         return json({ ...stored, lyrics, model, contentType, recovered: model !== musicModels[0] });
       } catch (caught) { lastMusicError = caught; }
     }
+    let fallbackLyrics = lyricsHint;
     try {
-      const fallback = await postTextGemini(apiKey, { contents: [{ parts: [{ text: `${prompt}\nتعذر إخراج الصوت الموسيقي الآن. اكتب بدلًا منه كلمات أصلية جاهزة، كورس، بنية Verse/Chorus، BPM تقريبي، وآلات مقترحة حتى يستمر الإنتاج بدون توقف.` }] }], generationConfig: { temperature: 0.55 } });
-      return json({ url: '', lyrics: extractText(fallback.result), model: fallback.model, contentType: 'text/plain', degraded: true });
+      const fallback = await postTextGemini(apiKey, { contents: [{ parts: [{ text: `${prompt}\nتعذر إخراج الصوت الموسيقي من المحرك الرئيسي الآن. اكتب كلمات أصلية جاهزة، كورس، بنية Verse/Chorus، BPM تقريبي، وآلات مقترحة حتى يستمر الإنتاج.` }] }], generationConfig: { temperature: 0.55 } });
+      fallbackLyrics = extractText(fallback.result) || fallbackLyrics;
+    } catch (caught) {
+      console.warn('Music text recovery failed', statusFromError(caught) || statusFromError(lastMusicError) || 'unknown');
+    }
+    try {
+      const emergency = emergencyMusicWavBase64(topic, mode === 'full' ? 30 : 18, mood);
+      const stored = await storeBase64(safeMediaPath('song-emergency', 'wav'), emergency.wavBase64, 'audio/wav');
+      return json({
+        ...stored,
+        lyrics: fallbackLyrics,
+        model: 'local-emergency-music-v1',
+        contentType: 'audio/wav',
+        degraded: true,
+        emergencyAudio: true,
+        bpm: emergency.bpm,
+        durationSeconds: emergency.durationSeconds,
+        recoveredFromStatus: statusFromError(lastMusicError) || null,
+      });
     } catch (caught) {
       console.warn('Music recovery failed', statusFromError(caught) || statusFromError(lastMusicError) || 'unknown');
       return externalError(lastMusicError || caught);
@@ -642,7 +730,13 @@ export const handler = router({
           const extension = contentType.includes('jpeg') ? 'jpg' : 'png';
           const stored = await storeBase64(safeMediaPath('image', extension), imageBase64, contentType);
           return json({ ...stored, model, contentType, imageSizeUsed: requestedSize, recovered: model !== imageModels[0] || version !== 'v1' });
-        } catch (caught) { lastImageError = caught; if (statusFromError(caught) === 429) return externalError(caught); }
+        } catch (caught) {
+          lastImageError = caught;
+          const status = statusFromError(caught);
+          if (status === 401 || status === 403) break;
+          // 429/5xx must continue through alternate image models and the
+          // platform fallback instead of surfacing an avoidable hard failure.
+        }
       }
     }
     try {
@@ -824,13 +918,14 @@ export const handler = router({
     if (!idea) return error('اكتب فكرة الحلقة.', 400);
     const duration = Number.isFinite(input.duration) ? Math.min(90, Math.max(15, Math.round(input.duration as number))) : 30;
     const learningGoal = typeof input.learningGoal === 'string' ? input.learningGoal.trim().slice(0, 300) : '';
+    if (learningGoal.length < 12) return error('اكتب هدف تعلم واضح ومحدد للحلقة قبل التوليد.', 422);
     const bible = typeof input.bible === 'string' ? input.bible.trim().slice(0, 1800) : '';
     const profileSummary = typeof input.profileSummary === 'string' ? input.profileSummary.trim().slice(0, 1000) : '';
     const pronunciation = cleanPronunciation(input.pronunciation);
     const dialect = typeof input.dialect === 'string' ? input.dialect.trim().slice(0, 420) : 'عامية مصرية طبيعية ar-EG';
     const apiKey = await getGeminiKey();
     if (!apiKey) return error('مفتاح Gemini غير مربوط بالتطبيق.', 503);
-    const prompt = `أنت مخرج محتوى أطفال مصري. اللهجة المطلوبة: ${dialect}. لا تستخدم اللهجة بشكل ساخر أو مبالغ فيه. صمم حلقة أصلية مدتها ${duration} ثانية لفكرة: ${idea}. ${learningGoal ? `هدف التعلم: ${learningGoal}.` : ''} كل الشخصيات أطفال خياليون فقط. هوية القناة: ${bible || 'عامية مصرية بيضاء، تعليم ممتع، حبكة واضحة'}. الشخصيات المتاحة: ${profileSummary || 'اختر طفلين متمايزين'}. ${pronunciation.length ? `قاموس النطق: ${pronunciation.map(item => `${item.term}=>${item.sayAs}`).join(' | ')}.` : ''} اكتب: Hook لأول ثانيتين، هدف واحد قابل للقياس، الحوار بالعامية المصرية، ملاحظات Director Mode لكل جملة، لقطة بلقطة، Prompt صورة لكل لقطة، Prompt Veo 9:16 لكل لقطة، خطة مؤثرات Foley، وفكرة أغنية أو Jingle. اجعل الجمل قصيرة، السرد متماسك، وتجنب التكرار الآلي والمحتوى التعليمي الزائف.`;
+    const prompt = `أنت مخرج محتوى أطفال مصري. اللهجة المطلوبة: ${dialect}. لا تستخدم اللهجة بشكل ساخر أو مبالغ فيه. صمم حلقة أصلية مدتها ${duration} ثانية لفكرة: ${idea}. ${learningGoal ? `هدف التعلم: ${learningGoal}.` : ''} كل الشخصيات أطفال خياليون فقط. هوية القناة: ${bible || 'عامية مصرية بيضاء، تعليم ممتع، حبكة واضحة'}. الشخصيات المتاحة: ${profileSummary || 'اختر طفلين متمايزين'}. ${pronunciation.length ? `قاموس النطق: ${pronunciation.map(item => `${item.term}=>${item.sayAs}`).join(' | ')}.` : ''} اكتب: Hook لأول ثانيتين، هدف واحد قابل للقياس، الحوار بالعامية المصرية، ملاحظات Director Mode لكل جملة، لقطة بلقطة، Prompt صورة لكل لقطة، Prompt Veo 9:16 لكل لقطة، خطة مؤثرات Foley، وفكرة أغنية أو Jingle. أضف سؤال تفاعلي بسيط مناسب للعمر، ثم Recap قصير يثبت ما تعلمه الطفل، واذكر بوضوح كيف تختلف الحلقة عن أي محتوى مرجعي حتى تظل أصلية. اجعل الجمل قصيرة، السرد متماسك، وتجنب التكرار الآلي والمحتوى التعليمي الزائف.`;
     try {
       const { result, model } = await postTextGemini(apiKey, {
         contents: [{ parts: [{ text: prompt }] }],
@@ -838,7 +933,7 @@ export const handler = router({
       });
       const plan = extractText(result);
       if (!plan) throw new Error('plan_missing');
-      return json({ plan, model });
+      return json({ plan, model, educationalPolicy: { preflightPassed: true, fullReviewRequiredBeforeExport: true, learningObjective: learningGoal, requirements: ['interactive-question','recap','originality'] } });
     } catch (caught) {
       console.warn('Episode plan failed', (caught as any)?.status || 'unknown');
       return externalError(caught);

@@ -4,12 +4,15 @@ import { analyzePcm, fileToBase64, pcmToWavUrl } from './audio';
 import { childRecommended, defaultBible, defaultProfiles, defaultVideoRecord, dialectPresets, pipelineStages, qaItems, safetyItems, songTypes, standardVoiceTest, styleOptions, voiceMeta, voices } from './data';
 import type { AudioResult, ChannelBible, CharacterKey, DialectKey, GrowthMetrics, MetadataPack, ProductionStage, Profile, PronunciationEntry, RightsEntry, StyleKey, Tab, VideoRecord, VoiceQuality, VoiceResult } from './types';
 
+const WEB_VERSION = '7.15.0-alpha.1';
+
 const tabs: Array<{ id: Tab; icon: string; label: string }> = [
   { id: 'voice', icon: '🎙️', label: 'الصوت' }, { id: 'dialects', icon: '🇪🇬', label: 'لهجات مصر' }, { id: 'lab', icon: '🧪', label: 'مختبر الأطفال' },
   { id: 'dialogue', icon: '👧🏻', label: 'حوار طفلين' }, { id: 'record', icon: '🎧', label: 'سجل وحوّل' }, { id: 'music', icon: '🎵', label: 'أغاني' },
   { id: 'image', icon: '🎨', label: 'صور' }, { id: 'video', icon: '🎬', label: 'فيديو' }, { id: 'studio', icon: '✨', label: 'حلقة كاملة' },
   { id: 'production', icon: '🎛️', label: 'المراجعة والنشر' }, { id: 'growth', icon: '📈', label: 'النمو' }, { id: 'characters', icon: '🧒', label: 'الشخصيات' },
   { id: 'bible', icon: '📚', label: 'إعدادات القناة' },
+  { id: 'control', icon: '🧠', label: 'مركز سولي' },
 ];
 
 type ScoreEntry = { sum: number; count: number };
@@ -17,6 +20,16 @@ type LyricsReview = { kidSafe?: boolean; learningClarity?: number; memorability?
 type DialectVariant = { dialectKey?: string; label?: string; text?: string; notes?: string };
 type SafetyReview = { score?: number; passed?: boolean; risks?: string[]; strengths?: string[]; fixes?: string[]; learningIntegrity?: string; privacyRisk?: boolean; commercialPressure?: boolean };
 type Postmortem = { summary?: string; wins?: string[]; problems?: string[]; nextTest?: string; caution?: string; operations?: string[] };
+type OwnerAuthStatus = { configured?: boolean; disabled?: boolean; authenticated?: boolean };
+type WorkSummary = {
+  sessionId?: string;
+  goal?: string;
+  state?: string;
+  counts?: { pending?: number; running?: number; blocked?: number; done?: number; skipped?: number };
+  nextAction?: { id?: string; title?: string; status?: string } | null;
+  blockedTasks?: Array<{ id?: string; title?: string; blocker?: string; alternatives?: string[] }>;
+  updatedAt?: string;
+};
 
 function loadJson<T>(key: string, fallback: T): T {
   try {
@@ -88,6 +101,12 @@ function App() {
   const [experiment, setExperiment] = useState('فرضية واحدة: تغيير اللهجة فقط مع تثبيت الفكرة والطول والجودة');
   const [growthNotes, setGrowthNotes] = useState('');
   const [postmortem, setPostmortem] = useState<Postmortem | null>(null);
+  const [ownerAuth, setOwnerAuth] = useState<OwnerAuthStatus | null>(null);
+  const [runtimeVersion, setRuntimeVersion] = useState('');
+  const [ownerTokenInput, setOwnerTokenInput] = useState('');
+  const [focusGoal, setFocusGoal] = useState(() => loadJson('toto_focus_goal_v1', 'تطوير Toto Kids Studio بدون فقدان السياق، مع اجتياز الاختبارات قبل الدمج'));
+  const [workSummary, setWorkSummary] = useState<WorkSummary | null>(null);
+  const [focusBlocker, setFocusBlocker] = useState('');
 
   const [labText, setLabText] = useState(standardVoiceTest);
   const [labVoices, setLabVoices] = useState<string[]>(['Leda', 'Zephyr', 'Puck', 'Achird']);
@@ -163,6 +182,9 @@ function App() {
   useEffect(() => { localStorage.setItem('toto_safety_v4', JSON.stringify(safetyChecks)); }, [safetyChecks]);
   useEffect(() => { localStorage.setItem('toto_qa_v4', JSON.stringify(qaChecks)); }, [qaChecks]);
   useEffect(() => { localStorage.setItem('toto_growth_v4', JSON.stringify(growth)); }, [growth]);
+  useEffect(() => { void checkOwnerAuth(); }, []);
+  useEffect(() => { localStorage.setItem('toto_focus_goal_v1', JSON.stringify(focusGoal)); }, [focusGoal]);
+  useEffect(() => { if (tab === 'control') void loadFocusStatus(); }, [tab]);
   useEffect(() => {
     if (!currentProfile) return;
     setVoice(currentProfile.voice);
@@ -182,10 +204,25 @@ function App() {
     if (controlMode === 'quality') { setVideoModel('veo-3.1-generate-preview'); setVideoResolution('1080p'); setImageSize('4K'); }
   }, [controlMode]);
   useEffect(() => {
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => undefined);
+    void checkRuntimeVersion();
+    let reloading = false;
+    const onControllerChange = () => {
+      if (reloading) return;
+      reloading = true;
+      window.location.reload();
+    };
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+      navigator.serviceWorker.register('./sw.js')
+        .then(registration => registration.update())
+        .catch(() => undefined);
+    }
     const handler = (event: Event) => { event.preventDefault(); setInstallPrompt(event); };
     window.addEventListener('beforeinstallprompt', handler);
-    return () => window.removeEventListener('beforeinstallprompt', handler);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handler);
+      if ('serviceWorker' in navigator) navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+    };
   }, []);
 
   function clearAudio() {
@@ -193,14 +230,28 @@ function App() {
     setAudioResults([]);
   }
 
-  async function recoverCall(_label: string, runner: () => Promise<{ data: any }>, attempts = 3) {
+  function errorStatus(value: unknown) {
+    return Number((value as { status?: number })?.status || 0);
+  }
+
+  function errorMessage(value: unknown) {
+    const data = (value as { data?: { message?: string; error?: string } })?.data;
+    return String(data?.message || data?.error || (value as { message?: string })?.message || '').trim();
+  }
+
+  async function recoverCall(label: string, runner: () => Promise<{ data: any }>, attempts = 2) {
     let lastError: unknown = null;
+    const retryable = new Set([408, 425, 429, 499, 500, 502, 503, 504]);
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
         return await runner();
       } catch (caught) {
         lastError = caught;
-        if (attempt < attempts - 1) await new Promise(resolve => setTimeout(resolve, 650 * (2 ** attempt) + Math.floor(Math.random() * 350)));
+        const status = errorStatus(caught);
+        if (!retryable.has(status) || attempt >= attempts - 1) break;
+        const base = status === 429 ? 1800 : 700;
+        setLoading(`${label} — محاولة استرجاع ${attempt + 2}/${attempts}`);
+        await new Promise(resolve => setTimeout(resolve, base * (2 ** attempt) + Math.floor(Math.random() * 400)));
       }
     }
     throw lastError || new Error('recovery_exhausted');
@@ -210,8 +261,152 @@ function App() {
     return recoverCall(label, () => api.post(path, body));
   }
 
-  function showError(_value: unknown) {
-    setMessage('تعذر التنفيذ');
+  function showError(value: unknown) {
+    const status = errorStatus(value);
+    const detail = errorMessage(value);
+    if (status === 401) {
+      setOwnerAuth(current => ({ ...(current || {}), authenticated: false }));
+      setMessage('جلسة المالك مقفولة. افتحها من أعلى الصفحة وكمل.');
+      return;
+    }
+    if (status === 403) {
+      setMessage(detail || 'المحرك الحالي مش مسموح للمفتاح المستخدم. هنحتاج محرك بديل أو صلاحية صحيحة.');
+      return;
+    }
+    if (status === 404) {
+      setMessage('اتكشف عدم تطابق بين نسخة الواجهة والسيرفر. حدّث الصفحة؛ ولو استمر، الإصدار المنشور محتاج مزامنة.');
+      return;
+    }
+    if (status === 429) {
+      setMessage('ضغط/حصة مؤقتة على مزود التوليد. جرّبنا الاسترجاع تلقائيًا؛ المهمة نفسها محفوظة وممكن تتعاد بعد هدوء الحصة.');
+      return;
+    }
+    if ([408, 499, 502, 503, 504].includes(status)) {
+      setMessage(detail || 'المزود اتأخر أو غير متاح مؤقتًا. البرنامج حاول الاسترجاع تلقائيًا من غير ما يضيّع إعداداتك.');
+      return;
+    }
+    setMessage(detail || 'حصل خطأ غير متوقع، واتحفظت إعداداتك الحالية.');
+  }
+
+  async function checkRuntimeVersion() {
+    try {
+      const { data } = await api.get('/health');
+      const serverVersion = String((data as { version?: string })?.version || '');
+      setRuntimeVersion(serverVersion);
+      if (serverVersion && serverVersion !== WEB_VERSION) {
+        setMessage(`في تحديث جديد بيتثبت: الواجهة ${WEB_VERSION} والسيرفر ${serverVersion}. هنعمل مزامنة تلقائية مع أول تحديث للصفحة.`);
+      }
+    } catch {
+      setRuntimeVersion('');
+    }
+  }
+
+  async function checkOwnerAuth() {
+    try {
+      const { data } = await api.authStatus();
+      setOwnerAuth(data as OwnerAuthStatus);
+    } catch {
+      setOwnerAuth({ configured: false, disabled: false, authenticated: false });
+    }
+  }
+
+  async function loginOwner() {
+    if (!ownerTokenInput.trim()) { setMessage('اكتب Owner Token.'); return; }
+    setLoading('owner-login'); setMessage('');
+    try {
+      await api.login(ownerTokenInput.trim());
+      setOwnerTokenInput('');
+      await checkOwnerAuth();
+      setMessage('تم فتح جلسة المالك بأمان.');
+    } catch (caught) {
+      showError(caught);
+    } finally {
+      setLoading('');
+    }
+  }
+
+  async function logoutOwner() {
+    setLoading('owner-logout'); setMessage('');
+    try {
+      await api.logout();
+      await checkOwnerAuth();
+      setMessage('تم قفل جلسة المالك.');
+    } catch (caught) {
+      showError(caught);
+    } finally {
+      setLoading('');
+    }
+  }
+
+  async function loadFocusStatus() {
+    setLoading('focus-status');
+    try {
+      const { data } = await api.tool('soly.work.session.read', { sessionId: 'active' }, ['project:work:read']);
+      setWorkSummary((data as any)?.result?.summary || null);
+    } catch (caught) {
+      if ((caught as { status?: number })?.status === 404) setWorkSummary(null);
+      else showError(caught);
+    } finally {
+      setLoading('');
+    }
+  }
+
+  async function startFocusSession() {
+    setLoading('focus-start');
+    try {
+      const tasks = [
+        { id: 'ci', title: 'تشغيل وفحص Core Resilience CI', status: 'running' },
+        { id: 'gateway', title: 'تثبيت Work Continuity وModel Router داخل Gateway', status: 'done' },
+        { id: 'education', title: 'فرض هدف تعليمي وأصالة على Episode Plan', status: 'done' },
+        { id: 'chaos', title: 'اختبارات فوضى واسترجاع آمن', status: 'done' },
+        { id: 'shortform', title: 'مخطط Shorts رأسي 9:16', status: 'done' },
+        { id: 'control-ui', title: 'تفعيل مركز سولي في الواجهة', status: 'running' },
+        { id: 'review', title: 'مراجعة PR والاختبارات قبل الدمج', status: 'pending' },
+      ];
+      const { data } = await api.tool('soly.work.session.create', { sessionId: 'active', goal: focusGoal, tasks }, ['project:work:write']);
+      setWorkSummary((data as any)?.result?.summary || null);
+      setMessage('جلسة المتابعة اتسجلت');
+    } catch (caught) {
+      showError(caught);
+    } finally {
+      setLoading('');
+    }
+  }
+
+  async function completeFocusTask() {
+    const taskId = workSummary?.nextAction?.id;
+    if (!taskId) return;
+    setLoading('focus-complete');
+    try {
+      const { data } = await api.tool('soly.work.checkpoint', { sessionId: 'active', taskId, status: 'done', note: 'اكتملت من مركز سولي' }, ['project:work:write']);
+      setWorkSummary((data as any)?.result?.summary || null);
+    } catch (caught) {
+      showError(caught);
+    } finally {
+      setLoading('');
+    }
+  }
+
+  async function blockFocusTask() {
+    const taskId = workSummary?.nextAction?.id;
+    if (!taskId) return;
+    setLoading('focus-block');
+    try {
+      const { data } = await api.tool('soly.work.checkpoint', {
+        sessionId: 'active',
+        taskId,
+        status: 'blocked',
+        blocker: focusBlocker || 'المسار الحالي متعطل',
+        alternatives: ['انتقل لأول مهمة مستقلة متاحة ثم ارجع للعائق لاحقًا'],
+        nextAction: 'continue-next-independent-task',
+      }, ['project:work:write']);
+      setWorkSummary((data as any)?.result?.summary || null);
+      setFocusBlocker('');
+    } catch (caught) {
+      showError(caught);
+    } finally {
+      setLoading('');
+    }
   }
 
   function resultToAudio(result: VoiceResult, label: string, blindCode?: string): AudioResult {
@@ -229,6 +424,26 @@ function App() {
 
   function voicePayload(extra: Record<string, unknown> = {}) {
     return { text, voice, age, character, style, childStrength, expression, speed, pitch, energy, directorNotes, pronunciation: dictionary, dialect: selectedDialect.prompt, ...extra };
+  }
+
+  function browserVoicePreview(script: string) {
+    if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') return false;
+    try {
+      const utterance = new SpeechSynthesisUtterance(script);
+      const available = window.speechSynthesis.getVoices();
+      const preferred = available.find(item => item.lang.toLowerCase().startsWith('ar-eg'))
+        || available.find(item => item.lang.toLowerCase().startsWith('ar'));
+      if (preferred) utterance.voice = preferred;
+      utterance.lang = 'ar-EG';
+      utterance.rate = Math.min(1.18, Math.max(0.82, speed));
+      utterance.pitch = Math.min(1.7, Math.max(0.7, 1 + pitch * 0.08));
+      utterance.volume = 1;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async function checkQuality(itemId: string, sourceText = text) {
@@ -256,19 +471,28 @@ function App() {
   async function generateVoice() {
     clearAudio(); setMessage(''); setLoading('بنجهّز Voice DNA ونمثل الجملة...');
     try {
-      const response = await recoverPost('/api/tts', voicePayload());
+      const response = await recoverPost('/api/tts', voicePayload(), 'توليد الصوت');
       const result = response.data as VoiceResult;
       const audio = resultToAudio(result, currentProfile?.name || 'طفل');
       setAudioResults([audio]);
       if (autoQa) {
         setLoading('الصوت جاهز، بنعمل فحص نطق تلقائي...');
-        const qualityResponse = await recoverPost('/api/quality-check', {
-          text, pcmBase64: result.pcmBase64, sampleRate: result.sampleRate, channels: result.channels, bitDepth: result.bitDepth, pronunciation: dictionary,
-        });
-        setAudioResults([{ ...audio, quality: qualityResponse.data as VoiceQuality }]);
+        try {
+          const qualityResponse = await recoverPost('/api/quality-check', {
+            text, pcmBase64: result.pcmBase64, sampleRate: result.sampleRate, channels: result.channels, bitDepth: result.bitDepth, pronunciation: dictionary,
+          }, 'فحص النطق');
+          setAudioResults([{ ...audio, quality: qualityResponse.data as VoiceQuality }]);
+        } catch {
+          setMessage('الصوت اتولد بنجاح، لكن فحص النطق التلقائي اتأجل مؤقتًا. الملف نفسه محفوظ وجاهز.');
+        }
       }
     } catch (caught) {
-      showError(caught);
+      const status = errorStatus(caught);
+      if ([404, 408, 425, 429, 499, 500, 502, 503, 504].includes(status) && browserVoicePreview(text)) {
+        setMessage('محرك الصوت الخارجي مش متاح دلوقتي؛ شغّلت معاينة ar-EG من الجهاز بدل الشاشة الفاضية. المعاينة مؤقتة وليست ملف التصدير النهائي.');
+      } else {
+        showError(caught);
+      }
     } finally { setLoading(''); }
   }
 
@@ -364,9 +588,10 @@ function App() {
       const response = await recoverPost('/api/music', {
         topic: musicTopic, mode: musicMode, mood: musicMood, vocals: musicVocals, lyricsHint: lyricsDraft, songType, bibleSummary: bibleSummary(bible), dialect: selectedDialect.prompt,
       });
-      const data = response.data as { url: string; lyrics: string; model: string; degraded?: boolean };
+      const data = response.data as { url: string; lyrics: string; model: string; degraded?: boolean; emergencyAudio?: boolean };
       setMusicUrl(data.url || ''); setLyrics(data.lyrics || '');
-      if (data.degraded) setMessage('كملت الشغل بخطة كلمات وتلحين احتياطية بدل إيقاف المشروع؛ الصوت الموسيقي نفسه يتولد عند رجوع أحد محركات الموسيقى.');
+      if (data.degraded && data.emergencyAudio) setMessage('محرك الموسيقى الخارجي اتعطل، فـSoly ولّد موسيقى WAV محلية أصلية فعلية وكمل المشروع بدل ما يوقف.');
+      else if (data.degraded) setMessage('المحرك الخارجي اتعطل؛ تم الحفاظ على الكلمات والخطة لحد رجوع الصوت.');
     } catch (caught) { showError(caught); } finally { setLoading(''); }
   }
 
@@ -533,14 +758,23 @@ function App() {
   return (
     <main className='shell'>
       <header className='hero'>
-        <div className='brand-mark'><img src='./icon.svg' alt='شعار صوت توتو' /></div>
+        <div className='brand-mark'><img src='./icon.svg' alt='شعار Toto Kids Studio' /></div>
         <div className='hero-copy'>
           <p className='eyebrow'>TOTO KIDS STUDIO</p>
-          <h1>صوت توتو <span>6.0</span></h1>
-          <p>صوت مصري طبيعي وإنتاج بسيط في مكان واحد.</p>
+          <h1>Toto Kids Studio <span>7.15 Alpha</span></h1>
+          <p>إنتاج أطفال مصري متكامل، مع Soly Focus وحماية جلسة المالك.</p>
         </div>
         {installPrompt && <button className='install' onClick={installApp}>📲 تثبيت</button>}
       </header>
+
+      {ownerAuth && !ownerAuth.authenticated && <section className='panel'>
+        <div className='section-head'><div><p className='kicker'>OWNER SESSION</p><h2>حماية مفاتيح التوليد والحسابات</h2></div><span className='badge hot'>مقفول</span></div>
+        {!ownerAuth.configured && !ownerAuth.disabled ? <p className='hint'>السيرفر محتاج متغير <code>SOLY_OWNER_TOKEN</code> قبل أي تشغيل إنتاجي لـ7.15. لحد ما يتظبط، التوليد والأدوات الحساسة مقفولة افتراضيًا.</p> : <>
+          <p className='hint'>اكتب Owner Token مرة واحدة. السيرفر يحوله لجلسة HttpOnly؛ التوكن نفسه لا يتحفظ في LocalStorage.</p>
+          <div className='action-row'><input type='password' value={ownerTokenInput} onChange={event => setOwnerTokenInput(event.target.value)} placeholder='Owner Token' autoComplete='current-password' /><button className='primary' disabled={Boolean(loading)} onClick={loginOwner}>🔐 فتح جلسة المالك</button></div>
+        </>}
+      </section>}
+      {ownerAuth?.authenticated && !ownerAuth.disabled && <div className='action-row'><span className='badge good-badge'>🔒 جلسة المالك مفتوحة</span><button className='mini' disabled={Boolean(loading)} onClick={logoutOwner}>قفل الجلسة</button></div>}
 
       <nav className='tabs'>
         {tabs.map(item => <button key={item.id} className={tab === item.id ? 'tab active' : 'tab'} onClick={() => { setTab(item.id); setMessage(''); }}>{item.icon}<span>{item.label}</span></button>)}
@@ -731,10 +965,29 @@ function App() {
         <div className='divider' /><div className='action-row'><button className='secondary grow' onClick={exportProject}>⬇️ نسخة احتياطية Project DNA</button><label className='secondary grow import-button'>⬆️ استرجاع نسخة<input type='file' accept='application/json' onChange={event => importProject(event.target.files?.[0] || null)} /></label></div>
       </section>}
 
+      {tab === 'control' && <section className='panel'>
+        <div className='section-head'><div><p className='kicker'>SOLY FOCUS CONTROL</p><h2>حالة الشغل محفوظة والخطوة الجاية واضحة</h2></div><span className={workSummary?.state === 'completed' ? 'badge good-badge' : 'badge gold'}>{workSummary?.state === 'completed' ? 'مكتمل' : workSummary ? 'شغال' : 'ابدأ جلسة'}</span></div>
+        <p className='hint'>لو مسار اتعطل، سجله كـ Blocked وكمل أول مهمة مستقلة متاحة. المركز لا ينشر ولا يدفع ولا يغيّر أسرار تلقائيًا.</p>
+        <p className='hint'>نسخة الواجهة: <strong>{WEB_VERSION}</strong> • نسخة السيرفر: <strong>{runtimeVersion || 'جاري الفحص'}</strong></p>
+        <label className='field'>هدف الجلسة<textarea value={focusGoal} onChange={event => setFocusGoal(event.target.value)} /></label>
+        <div className='grid two'>
+          <label>وضع التشغيل<select value={controlMode} onChange={event => setControlMode(event.target.value as 'economy' | 'balanced' | 'quality')}><option value='economy'>اقتصادي — أقل استهلاك</option><option value='balanced'>متوازن</option><option value='quality'>جودة — أعلى استهلاك</option></select></label>
+          <div className='hint'>الوضع الحالي يضبط الفيديو والصورة محليًا. أي خدمة مدفوعة تظل محتاجة قرار صريح؛ مركز سولي لا يشتري Credits.</div>
+        </div>
+        <div className='action-row'><button className='primary grow' disabled={Boolean(loading)} onClick={startFocusSession}>🧠 ابدأ/أعد بناء جلسة المتابعة</button><button className='secondary grow' disabled={Boolean(loading)} onClick={loadFocusStatus}>↻ تحديث الحالة</button></div>
+        {workSummary && <div className='lux-card'>
+          <div className='section-head'><h3>التقدم</h3><span className='badge'>{workSummary.counts?.done || 0} تم • {workSummary.counts?.blocked || 0} متعطل • {workSummary.counts?.pending || 0} منتظر</span></div>
+          <p><strong>الهدف:</strong> {workSummary.goal}</p>
+          {workSummary.nextAction ? <div className='recovery-card'><strong>الخطوة التالية</strong><p>{workSummary.nextAction.title}</p><div className='action-row'><button className='primary grow' disabled={Boolean(loading)} onClick={completeFocusTask}>✓ خلصت — هات اللي بعدها</button></div><label className='field'>لو المسار متعطل<input value={focusBlocker} onChange={event => setFocusBlocker(event.target.value)} placeholder='مثال: Provider quota / صلاحية ناقصة' /></label><button className='secondary wide' disabled={Boolean(loading)} onClick={blockFocusTask}>⤴ سجّل العائق وكمل مسار تاني</button></div> : <p className='hint success'>مفيش مهام Pending أو Running في الجلسة الحالية.</p>}
+          {workSummary.blockedTasks?.length ? <div className='rights-list'>{workSummary.blockedTasks.map(item => <article key={item.id}><div><strong>{item.title}</strong><span>{item.blocker || 'عائق مسجل'}</span></div><em className='right-review'>Blocked</em></article>)}</div> : null}
+          <p className='hint'>آخر تحديث: {workSummary.updatedAt || 'غير معروف'}</p>
+        </div>}
+      </section>}
+
       {loading && <div className='floating-status' aria-label='جاري التنفيذ'><span className='spinner' /></div>}
       {message && <div className='message' role='alert'>{message}{message === 'تعذر التنفيذ' && <button className='mini' onClick={() => setMessage('')}>إعادة</button>}</div>}
 
-      <footer>صوت توتو 6.0</footer>
+      <footer>Toto Kids Studio • Soly Focus 7.15 dev</footer>
     </main>
   );
 }

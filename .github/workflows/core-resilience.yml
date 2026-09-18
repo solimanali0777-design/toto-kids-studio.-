@@ -1,0 +1,44 @@
+name: Core Resilience Check
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'tests/**'
+      - '.github/workflows/core-resilience.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'tests/**'
+      - '.github/workflows/core-resilience.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check new resilience modules
+        run: |
+          node --check backend/workContinuity.mjs
+          node --check backend/selfRepairLoop.mjs
+          node --check backend/modelRouter.mjs
+          node --check backend/educationPolicy.mjs
+          node --check backend/shortFormPlanner.mjs
+          node --check backend/toolContracts.js
+          node --check backend/solyGatewayCore.js
+          node --check backend/solyGatewayServer.mjs
+      - name: Typecheck AppDeploy compatibility API
+        run: |
+          npm install --no-save --ignore-scripts typescript@5.7.3 @types/node@22
+          npx tsc backend/appdeployCompatApi.mts --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --types node --skipLibCheck --noEmit
+      - name: Run resilience tests
+        run: node --test tests/*.test.mjs
