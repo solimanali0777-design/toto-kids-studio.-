@@ -13,6 +13,7 @@ import { createWorkSession, getWorkSession, checkpointWork, summarizeWorkSession
 import { selectModel } from './modelRouter.mjs';
 import { evaluateEducationalPlan } from './educationPolicy.mjs';
 import { planShortForm } from './shortFormPlanner.mjs';
+import { evaluateMonetizationContent, monetizationProgress } from './youtubeMonetizationGate.mjs';
 import { durableConfigured, durableGet, durablePut, durableBlobGet } from './durableStore.mjs';
 import { handler as appdeployCompatHandler } from './appdeployCompatApi.mjs';
 import { buildOwnerAuth } from './ownerAuth.mjs';
@@ -50,6 +51,8 @@ const adapters={
   'soly.model.route':async args=>({adapter:'internal-model-router',...selectModel(args)}),
   'toto.education.review':async args=>({adapter:'internal-education-policy',...evaluateEducationalPlan(args)}),
   'toto.shortform.plan':async args=>({adapter:'internal-shortform-planner',...planShortForm(args)}),
+  'toto.monetization.review':async args=>({adapter:'internal-youtube-policy',...evaluateMonetizationContent(args)}),
+  'toto.monetization.progress':async args=>({adapter:'internal-youtube-policy',...monetizationProgress(args)}),
   ...createAccountAdapters(),
   'workspace.asset.read':async args=>readWorkspaceAsset(args),
   'workspace.asset.persist':async args=>persistWorkspaceAsset(args),
