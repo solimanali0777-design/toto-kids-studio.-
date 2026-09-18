@@ -1,0 +1,7 @@
+Trigger canonical Railway source deployment for AI route migration.
+UTC: 2026-09-18
+Includes:
+- backend/appdeployCompatApi.mts
+- backend/appdeployShim.mjs
+- backend/solyGatewayServer.mjs AI compatibility routing
+- Dockerfile API compile stage

@@ -1,0 +1,32 @@
+name: Build Backup Web Artifact
+
+on:
+  push:
+    paths:
+      - '.github/workflows/backup-web-artifact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build web
+        working-directory: web
+        env:
+          VITE_GATEWAY_URL: https://soly-gateway-7-14-production.up.railway.app
+        run: |
+          npm install
+          npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toto-web-dist
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 1
