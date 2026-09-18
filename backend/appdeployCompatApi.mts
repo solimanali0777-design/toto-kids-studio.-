@@ -642,7 +642,13 @@ export const handler = router({
           const extension = contentType.includes('jpeg') ? 'jpg' : 'png';
           const stored = await storeBase64(safeMediaPath('image', extension), imageBase64, contentType);
           return json({ ...stored, model, contentType, imageSizeUsed: requestedSize, recovered: model !== imageModels[0] || version !== 'v1' });
-        } catch (caught) { lastImageError = caught; if (statusFromError(caught) === 429) return externalError(caught); }
+        } catch (caught) {
+          lastImageError = caught;
+          const status = statusFromError(caught);
+          if (status === 401 || status === 403) break;
+          // 429/5xx must continue through alternate image models and the
+          // platform fallback instead of surfacing an avoidable hard failure.
+        }
       }
     }
     try {
