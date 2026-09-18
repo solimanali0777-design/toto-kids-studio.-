@@ -4,6 +4,8 @@ import { analyzePcm, fileToBase64, pcmToWavUrl } from './audio';
 import { childRecommended, defaultBible, defaultProfiles, defaultVideoRecord, dialectPresets, pipelineStages, qaItems, safetyItems, songTypes, standardVoiceTest, styleOptions, voiceMeta, voices } from './data';
 import type { AudioResult, ChannelBible, CharacterKey, DialectKey, GrowthMetrics, MetadataPack, ProductionStage, Profile, PronunciationEntry, RightsEntry, StyleKey, Tab, VideoRecord, VoiceQuality, VoiceResult } from './types';
 
+const WEB_VERSION = '7.15.0-alpha.1';
+
 const tabs: Array<{ id: Tab; icon: string; label: string }> = [
   { id: 'voice', icon: '🎙️', label: 'الصوت' }, { id: 'dialects', icon: '🇪🇬', label: 'لهجات مصر' }, { id: 'lab', icon: '🧪', label: 'مختبر الأطفال' },
   { id: 'dialogue', icon: '👧🏻', label: 'حوار طفلين' }, { id: 'record', icon: '🎧', label: 'سجل وحوّل' }, { id: 'music', icon: '🎵', label: 'أغاني' },
@@ -100,6 +102,7 @@ function App() {
   const [growthNotes, setGrowthNotes] = useState('');
   const [postmortem, setPostmortem] = useState<Postmortem | null>(null);
   const [ownerAuth, setOwnerAuth] = useState<OwnerAuthStatus | null>(null);
+  const [runtimeVersion, setRuntimeVersion] = useState('');
   const [ownerTokenInput, setOwnerTokenInput] = useState('');
   const [focusGoal, setFocusGoal] = useState(() => loadJson('toto_focus_goal_v1', 'تطوير Toto Kids Studio بدون فقدان السياق، مع اجتياز الاختبارات قبل الدمج'));
   const [workSummary, setWorkSummary] = useState<WorkSummary | null>(null);
@@ -201,10 +204,25 @@ function App() {
     if (controlMode === 'quality') { setVideoModel('veo-3.1-generate-preview'); setVideoResolution('1080p'); setImageSize('4K'); }
   }, [controlMode]);
   useEffect(() => {
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => undefined);
+    void checkRuntimeVersion();
+    let reloading = false;
+    const onControllerChange = () => {
+      if (reloading) return;
+      reloading = true;
+      window.location.reload();
+    };
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+      navigator.serviceWorker.register('./sw.js')
+        .then(registration => registration.update())
+        .catch(() => undefined);
+    }
     const handler = (event: Event) => { event.preventDefault(); setInstallPrompt(event); };
     window.addEventListener('beforeinstallprompt', handler);
-    return () => window.removeEventListener('beforeinstallprompt', handler);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handler);
+      if ('serviceWorker' in navigator) navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+    };
   }, []);
 
   function clearAudio() {
@@ -268,6 +286,19 @@ function App() {
       return;
     }
     setMessage(detail || 'حصل خطأ غير متوقع، واتحفظت إعداداتك الحالية.');
+  }
+
+  async function checkRuntimeVersion() {
+    try {
+      const { data } = await api.get('/health');
+      const serverVersion = String((data as { version?: string })?.version || '');
+      setRuntimeVersion(serverVersion);
+      if (serverVersion && serverVersion !== WEB_VERSION) {
+        setMessage(`في تحديث جديد بيتثبت: الواجهة ${WEB_VERSION} والسيرفر ${serverVersion}. هنعمل مزامنة تلقائية مع أول تحديث للصفحة.`);
+      }
+    } catch {
+      setRuntimeVersion('');
+    }
   }
 
   async function checkOwnerAuth() {
@@ -907,6 +938,7 @@ function App() {
       {tab === 'control' && <section className='panel'>
         <div className='section-head'><div><p className='kicker'>SOLY FOCUS CONTROL</p><h2>حالة الشغل محفوظة والخطوة الجاية واضحة</h2></div><span className={workSummary?.state === 'completed' ? 'badge good-badge' : 'badge gold'}>{workSummary?.state === 'completed' ? 'مكتمل' : workSummary ? 'شغال' : 'ابدأ جلسة'}</span></div>
         <p className='hint'>لو مسار اتعطل، سجله كـ Blocked وكمل أول مهمة مستقلة متاحة. المركز لا ينشر ولا يدفع ولا يغيّر أسرار تلقائيًا.</p>
+        <p className='hint'>نسخة الواجهة: <strong>{WEB_VERSION}</strong> • نسخة السيرفر: <strong>{runtimeVersion || 'جاري الفحص'}</strong></p>
         <label className='field'>هدف الجلسة<textarea value={focusGoal} onChange={event => setFocusGoal(event.target.value)} /></label>
         <div className='grid two'>
           <label>وضع التشغيل<select value={controlMode} onChange={event => setControlMode(event.target.value as 'economy' | 'balanced' | 'quality')}><option value='economy'>اقتصادي — أقل استهلاك</option><option value='balanced'>متوازن</option><option value='quality'>جودة — أعلى استهلاك</option></select></label>
