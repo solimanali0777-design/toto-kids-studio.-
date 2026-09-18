@@ -3,6 +3,7 @@
 Updated: 2026-09-18
 Working branch: `dev/7.15-focus-resilience`
 Canonical baseline: `7.14.1-alpha.1`
+Development version: `7.15.0-alpha.1`
 
 ## Rule of work
 
@@ -38,19 +39,20 @@ When a task is blocked:
 - [x] Educational quality/originality policy gate.
 - [x] Node tests for all four modules.
 - [x] GitHub Actions core resilience workflow.
+- [x] Self-repair integrated into the central Gateway execution path for safe L0/L1 idempotent work.
+- [x] Soly Focus Control UI connected to durable work sessions.
+- [x] Strict web TypeScript check added before build.
+- [x] Compatibility API TypeScript compile added to CI.
 
 ## Next actions
 
-1. Run CI on this branch and fix every failure.
-2. Review the new modules for integration points in the Soly Gateway.
-3. Add read-only work-status API first.
-4. Add safe checkpoint API second.
-5. Integrate model routing into text/vision selection without enabling paid calls automatically.
-6. Connect education-policy validation to episode planning and clean export.
-7. Add chaos tests for timeout / provider unavailable / malformed response.
-8. Add a short-form repurpose planner for 9:16 Shorts/Reels/TikTok.
-9. Audit current public/private repository exposure and secret history before any new production deployment.
-10. Only after tests and review: merge through PR. Deployment remains a separate explicit action.
+1. Finish the strengthened CI run (web typecheck + compatibility API compile) and fix any failure.
+2. Review PR #2 end-to-end for regression, privacy and secret exposure.
+3. Integrate model routing into real text/vision provider selection without enabling paid calls automatically.
+4. Connect education-policy validation to clean export as a release gate.
+5. Add malformed-provider-response chaos coverage.
+6. Audit current public/private repository exposure and secret history before any new production deployment.
+7. Merge through PR only after all checks are green. Deployment remains a separate explicit action.
 
 ## Reference priorities from the latest development review
 
@@ -68,3 +70,11 @@ When a task is blocked:
 - Paid image/video generation must not be exercised automatically.
 - External provider quota can fail independently of application correctness.
 - A background assistant cannot literally keep executing while the chat session is inactive; continuity must therefore be preserved in code/state so work can resume deterministically.
+
+
+## 7.15 verification log
+
+- Core Resilience Check passed after the first resilience/UI integration.
+- Web Build Check passed after Soly Focus Control was added.
+- Additional strict checks were then added for web TypeScript and AppDeploy compatibility API TypeScript; latest runs must be green before merge.
+- No deployment, publish, paid media generation, secret rotation, or production setting change is part of this development branch.
