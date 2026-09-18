@@ -36,5 +36,9 @@ jobs:
           node --check backend/toolContracts.js
           node --check backend/solyGatewayCore.js
           node --check backend/solyGatewayServer.mjs
+      - name: Typecheck AppDeploy compatibility API
+        run: |
+          npm install --no-save --ignore-scripts typescript@5.7.3 @types/node@22
+          npx tsc backend/appdeployCompatApi.mts --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --types node --skipLibCheck --noEmit
       - name: Run resilience tests
         run: node --test tests/*.test.mjs
