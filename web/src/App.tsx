@@ -821,6 +821,10 @@ function App() {
         <div className='section-head'><div><p className='kicker'>SOLY FOCUS CONTROL</p><h2>حالة الشغل محفوظة والخطوة الجاية واضحة</h2></div><span className={workSummary?.state === 'completed' ? 'badge good-badge' : 'badge gold'}>{workSummary?.state === 'completed' ? 'مكتمل' : workSummary ? 'شغال' : 'ابدأ جلسة'}</span></div>
         <p className='hint'>لو مسار اتعطل، سجله كـ Blocked وكمل أول مهمة مستقلة متاحة. المركز لا ينشر ولا يدفع ولا يغيّر أسرار تلقائيًا.</p>
         <label className='field'>هدف الجلسة<textarea value={focusGoal} onChange={event => setFocusGoal(event.target.value)} /></label>
+        <div className='grid two'>
+          <label>وضع التشغيل<select value={controlMode} onChange={event => setControlMode(event.target.value as 'economy' | 'balanced' | 'quality')}><option value='economy'>اقتصادي — أقل استهلاك</option><option value='balanced'>متوازن</option><option value='quality'>جودة — أعلى استهلاك</option></select></label>
+          <div className='hint'>الوضع الحالي يضبط الفيديو والصورة محليًا. أي خدمة مدفوعة تظل محتاجة قرار صريح؛ مركز سولي لا يشتري Credits.</div>
+        </div>
         <div className='action-row'><button className='primary grow' disabled={Boolean(loading)} onClick={startFocusSession}>🧠 ابدأ/أعد بناء جلسة المتابعة</button><button className='secondary grow' disabled={Boolean(loading)} onClick={loadFocusStatus}>↻ تحديث الحالة</button></div>
         {workSummary && <div className='lux-card'>
           <div className='section-head'><h3>التقدم</h3><span className='badge'>{workSummary.counts?.done || 0} تم • {workSummary.counts?.blocked || 0} متعطل • {workSummary.counts?.pending || 0} منتظر</span></div>
