@@ -313,6 +313,63 @@ async function generateChildPcm(apiKey: string, body: TtsBody) {
   throw lastError || new Error('tts_recovery_failed');
 }
 
+function emergencyMusicWavBase64(seedText: string, durationSeconds = 18, mood = 'cheerful') {
+  const sampleRate = 22050;
+  const duration = Math.min(30, Math.max(8, Math.round(durationSeconds)));
+  const sampleCount = sampleRate * duration;
+  const pcm = Buffer.alloc(sampleCount * 2);
+  const seedSource = `${seedText}|${mood}`;
+  let seed = 2166136261;
+  for (let i = 0; i < seedSource.length; i += 1) {
+    seed ^= seedSource.charCodeAt(i);
+    seed = Math.imul(seed, 16777619) >>> 0;
+  }
+  const random = () => {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+    return (seed >>> 0) / 0xffffffff;
+  };
+  const scale = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25];
+  const bright = /مبهج|مرح|cheer|happy|play|bounce|dance/i.test(mood);
+  const bpm = bright ? 118 : 96;
+  const beatSeconds = 60 / bpm;
+  const notesPerBeat = 1;
+  const noteSeconds = beatSeconds / notesPerBeat;
+  const motif = Array.from({ length: 16 }, (_, index) => {
+    const base = index % 4 === 0 ? 0 : Math.floor(random() * scale.length);
+    return scale[Math.min(scale.length - 1, base)];
+  });
+
+  for (let i = 0; i < sampleCount; i += 1) {
+    const t = i / sampleRate;
+    const noteIndex = Math.floor(t / noteSeconds) % motif.length;
+    const noteT = t % noteSeconds;
+    const frequency = motif[noteIndex];
+    const attack = Math.min(1, noteT / 0.02);
+    const release = Math.min(1, (noteSeconds - noteT) / 0.08);
+    const env = Math.max(0, Math.min(attack, release));
+    const sine = Math.sin(2 * Math.PI * frequency * t);
+    const harmonic = Math.sin(2 * Math.PI * frequency * 2 * t) * 0.22;
+    const bassFreq = scale[(noteIndex + 2) % 3] / 2;
+    const bass = Math.sin(2 * Math.PI * bassFreq * t) * 0.22;
+    const beatPos = t % beatSeconds;
+    const kickEnv = Math.max(0, 1 - beatPos / 0.09);
+    const kick = Math.sin(2 * Math.PI * (70 - 25 * (beatPos / 0.09)) * t) * kickEnv * 0.26;
+    const clapPhase = (t + beatSeconds / 2) % beatSeconds;
+    const clapEnv = clapPhase < 0.045 ? (1 - clapPhase / 0.045) : 0;
+    const noise = (random() * 2 - 1) * clapEnv * 0.07;
+    const masterFade = Math.min(1, t / 0.25, (duration - t) / 0.45);
+    const value = (sine * 0.42 + harmonic + bass + kick + noise) * env * Math.max(0, masterFade);
+    const sample = Math.max(-1, Math.min(1, value));
+    pcm.writeInt16LE(Math.round(sample * 32767), i * 2);
+  }
+  return {
+    wavBase64: pcmToWavBase64(pcm.toString('base64'), sampleRate, 1, 16),
+    sampleRate,
+    durationSeconds: duration,
+    bpm,
+  };
+}
+
 function pcmToWavBase64(pcmBase64: string, sampleRate = 24000, channels = 1, bitDepth = 16) {
   const pcm = Buffer.from(pcmBase64, 'base64');
   const header = Buffer.alloc(44);
@@ -601,9 +658,27 @@ export const handler = router({
         return json({ ...stored, lyrics, model, contentType, recovered: model !== musicModels[0] });
       } catch (caught) { lastMusicError = caught; }
     }
+    let fallbackLyrics = lyricsHint;
     try {
-      const fallback = await postTextGemini(apiKey, { contents: [{ parts: [{ text: `${prompt}\nتعذر إخراج الصوت الموسيقي الآن. اكتب بدلًا منه كلمات أصلية جاهزة، كورس، بنية Verse/Chorus، BPM تقريبي، وآلات مقترحة حتى يستمر الإنتاج بدون توقف.` }] }], generationConfig: { temperature: 0.55 } });
-      return json({ url: '', lyrics: extractText(fallback.result), model: fallback.model, contentType: 'text/plain', degraded: true });
+      const fallback = await postTextGemini(apiKey, { contents: [{ parts: [{ text: `${prompt}\nتعذر إخراج الصوت الموسيقي من المحرك الرئيسي الآن. اكتب كلمات أصلية جاهزة، كورس، بنية Verse/Chorus، BPM تقريبي، وآلات مقترحة حتى يستمر الإنتاج.` }] }], generationConfig: { temperature: 0.55 } });
+      fallbackLyrics = extractText(fallback.result) || fallbackLyrics;
+    } catch (caught) {
+      console.warn('Music text recovery failed', statusFromError(caught) || statusFromError(lastMusicError) || 'unknown');
+    }
+    try {
+      const emergency = emergencyMusicWavBase64(topic, mode === 'full' ? 30 : 18, mood);
+      const stored = await storeBase64(safeMediaPath('song-emergency', 'wav'), emergency.wavBase64, 'audio/wav');
+      return json({
+        ...stored,
+        lyrics: fallbackLyrics,
+        model: 'local-emergency-music-v1',
+        contentType: 'audio/wav',
+        degraded: true,
+        emergencyAudio: true,
+        bpm: emergency.bpm,
+        durationSeconds: emergency.durationSeconds,
+        recoveredFromStatus: statusFromError(lastMusicError) || null,
+      });
     } catch (caught) {
       console.warn('Music recovery failed', statusFromError(caught) || statusFromError(lastMusicError) || 'unknown');
       return externalError(lastMusicError || caught);
