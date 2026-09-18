@@ -824,13 +824,14 @@ export const handler = router({
     if (!idea) return error('اكتب فكرة الحلقة.', 400);
     const duration = Number.isFinite(input.duration) ? Math.min(90, Math.max(15, Math.round(input.duration as number))) : 30;
     const learningGoal = typeof input.learningGoal === 'string' ? input.learningGoal.trim().slice(0, 300) : '';
+    if (learningGoal.length < 12) return error('اكتب هدف تعلم واضح ومحدد للحلقة قبل التوليد.', 422);
     const bible = typeof input.bible === 'string' ? input.bible.trim().slice(0, 1800) : '';
     const profileSummary = typeof input.profileSummary === 'string' ? input.profileSummary.trim().slice(0, 1000) : '';
     const pronunciation = cleanPronunciation(input.pronunciation);
     const dialect = typeof input.dialect === 'string' ? input.dialect.trim().slice(0, 420) : 'عامية مصرية طبيعية ar-EG';
     const apiKey = await getGeminiKey();
     if (!apiKey) return error('مفتاح Gemini غير مربوط بالتطبيق.', 503);
-    const prompt = `أنت مخرج محتوى أطفال مصري. اللهجة المطلوبة: ${dialect}. لا تستخدم اللهجة بشكل ساخر أو مبالغ فيه. صمم حلقة أصلية مدتها ${duration} ثانية لفكرة: ${idea}. ${learningGoal ? `هدف التعلم: ${learningGoal}.` : ''} كل الشخصيات أطفال خياليون فقط. هوية القناة: ${bible || 'عامية مصرية بيضاء، تعليم ممتع، حبكة واضحة'}. الشخصيات المتاحة: ${profileSummary || 'اختر طفلين متمايزين'}. ${pronunciation.length ? `قاموس النطق: ${pronunciation.map(item => `${item.term}=>${item.sayAs}`).join(' | ')}.` : ''} اكتب: Hook لأول ثانيتين، هدف واحد قابل للقياس، الحوار بالعامية المصرية، ملاحظات Director Mode لكل جملة، لقطة بلقطة، Prompt صورة لكل لقطة، Prompt Veo 9:16 لكل لقطة، خطة مؤثرات Foley، وفكرة أغنية أو Jingle. اجعل الجمل قصيرة، السرد متماسك، وتجنب التكرار الآلي والمحتوى التعليمي الزائف.`;
+    const prompt = `أنت مخرج محتوى أطفال مصري. اللهجة المطلوبة: ${dialect}. لا تستخدم اللهجة بشكل ساخر أو مبالغ فيه. صمم حلقة أصلية مدتها ${duration} ثانية لفكرة: ${idea}. ${learningGoal ? `هدف التعلم: ${learningGoal}.` : ''} كل الشخصيات أطفال خياليون فقط. هوية القناة: ${bible || 'عامية مصرية بيضاء، تعليم ممتع، حبكة واضحة'}. الشخصيات المتاحة: ${profileSummary || 'اختر طفلين متمايزين'}. ${pronunciation.length ? `قاموس النطق: ${pronunciation.map(item => `${item.term}=>${item.sayAs}`).join(' | ')}.` : ''} اكتب: Hook لأول ثانيتين، هدف واحد قابل للقياس، الحوار بالعامية المصرية، ملاحظات Director Mode لكل جملة، لقطة بلقطة، Prompt صورة لكل لقطة، Prompt Veo 9:16 لكل لقطة، خطة مؤثرات Foley، وفكرة أغنية أو Jingle. أضف سؤال تفاعلي بسيط مناسب للعمر، ثم Recap قصير يثبت ما تعلمه الطفل، واذكر بوضوح كيف تختلف الحلقة عن أي محتوى مرجعي حتى تظل أصلية. اجعل الجمل قصيرة، السرد متماسك، وتجنب التكرار الآلي والمحتوى التعليمي الزائف.`;
     try {
       const { result, model } = await postTextGemini(apiKey, {
         contents: [{ parts: [{ text: prompt }] }],
@@ -838,7 +839,7 @@ export const handler = router({
       });
       const plan = extractText(result);
       if (!plan) throw new Error('plan_missing');
-      return json({ plan, model });
+      return json({ plan, model, educationalPolicy: { passed: true, learningObjective: learningGoal, requirements: ['interactive-question','recap','originality'] } });
     } catch (caught) {
       console.warn('Episode plan failed', (caught as any)?.status || 'unknown');
       return externalError(caught);
