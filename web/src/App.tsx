@@ -10,6 +10,7 @@ const tabs: Array<{ id: Tab; icon: string; label: string }> = [
   { id: 'image', icon: '🎨', label: 'صور' }, { id: 'video', icon: '🎬', label: 'فيديو' }, { id: 'studio', icon: '✨', label: 'حلقة كاملة' },
   { id: 'production', icon: '🎛️', label: 'المراجعة والنشر' }, { id: 'growth', icon: '📈', label: 'النمو' }, { id: 'characters', icon: '🧒', label: 'الشخصيات' },
   { id: 'bible', icon: '📚', label: 'إعدادات القناة' },
+  { id: 'control', icon: '🧠', label: 'مركز سولي' },
 ];
 
 type ScoreEntry = { sum: number; count: number };
@@ -17,6 +18,15 @@ type LyricsReview = { kidSafe?: boolean; learningClarity?: number; memorability?
 type DialectVariant = { dialectKey?: string; label?: string; text?: string; notes?: string };
 type SafetyReview = { score?: number; passed?: boolean; risks?: string[]; strengths?: string[]; fixes?: string[]; learningIntegrity?: string; privacyRisk?: boolean; commercialPressure?: boolean };
 type Postmortem = { summary?: string; wins?: string[]; problems?: string[]; nextTest?: string; caution?: string; operations?: string[] };
+type WorkSummary = {
+  sessionId?: string;
+  goal?: string;
+  state?: string;
+  counts?: { pending?: number; running?: number; blocked?: number; done?: number; skipped?: number };
+  nextAction?: { id?: string; title?: string; status?: string } | null;
+  blockedTasks?: Array<{ id?: string; title?: string; blocker?: string; alternatives?: string[] }>;
+  updatedAt?: string;
+};
 
 function loadJson<T>(key: string, fallback: T): T {
   try {
@@ -88,6 +98,9 @@ function App() {
   const [experiment, setExperiment] = useState('فرضية واحدة: تغيير اللهجة فقط مع تثبيت الفكرة والطول والجودة');
   const [growthNotes, setGrowthNotes] = useState('');
   const [postmortem, setPostmortem] = useState<Postmortem | null>(null);
+  const [focusGoal, setFocusGoal] = useState(() => loadJson('toto_focus_goal_v1', 'تطوير Toto Kids Studio بدون فقدان السياق، مع اجتياز الاختبارات قبل الدمج'));
+  const [workSummary, setWorkSummary] = useState<WorkSummary | null>(null);
+  const [focusBlocker, setFocusBlocker] = useState('');
 
   const [labText, setLabText] = useState(standardVoiceTest);
   const [labVoices, setLabVoices] = useState<string[]>(['Leda', 'Zephyr', 'Puck', 'Achird']);
@@ -163,6 +176,8 @@ function App() {
   useEffect(() => { localStorage.setItem('toto_safety_v4', JSON.stringify(safetyChecks)); }, [safetyChecks]);
   useEffect(() => { localStorage.setItem('toto_qa_v4', JSON.stringify(qaChecks)); }, [qaChecks]);
   useEffect(() => { localStorage.setItem('toto_growth_v4', JSON.stringify(growth)); }, [growth]);
+  useEffect(() => { localStorage.setItem('toto_focus_goal_v1', JSON.stringify(focusGoal)); }, [focusGoal]);
+  useEffect(() => { if (tab === 'control') void loadFocusStatus(); }, [tab]);
   useEffect(() => {
     if (!currentProfile) return;
     setVoice(currentProfile.voice);
@@ -212,6 +227,77 @@ function App() {
 
   function showError(_value: unknown) {
     setMessage('تعذر التنفيذ');
+  }
+
+  async function loadFocusStatus() {
+    setLoading('focus-status');
+    try {
+      const { data } = await api.tool('soly.work.session.read', { sessionId: 'active' }, ['project:work:read']);
+      setWorkSummary((data as any)?.result?.summary || null);
+    } catch (caught) {
+      if ((caught as { status?: number })?.status === 404) setWorkSummary(null);
+      else showError(caught);
+    } finally {
+      setLoading('');
+    }
+  }
+
+  async function startFocusSession() {
+    setLoading('focus-start');
+    try {
+      const tasks = [
+        { id: 'ci', title: 'تشغيل وفحص Core Resilience CI', status: 'running' },
+        { id: 'gateway', title: 'تثبيت Work Continuity وModel Router داخل Gateway', status: 'done' },
+        { id: 'education', title: 'فرض هدف تعليمي وأصالة على Episode Plan', status: 'done' },
+        { id: 'chaos', title: 'اختبارات فوضى واسترجاع آمن', status: 'done' },
+        { id: 'shortform', title: 'مخطط Shorts رأسي 9:16', status: 'done' },
+        { id: 'control-ui', title: 'تفعيل مركز سولي في الواجهة', status: 'running' },
+        { id: 'review', title: 'مراجعة PR والاختبارات قبل الدمج', status: 'pending' },
+      ];
+      const { data } = await api.tool('soly.work.session.create', { sessionId: 'active', goal: focusGoal, tasks }, ['project:work:write']);
+      setWorkSummary((data as any)?.result?.summary || null);
+      setMessage('جلسة المتابعة اتسجلت');
+    } catch (caught) {
+      showError(caught);
+    } finally {
+      setLoading('');
+    }
+  }
+
+  async function completeFocusTask() {
+    const taskId = workSummary?.nextAction?.id;
+    if (!taskId) return;
+    setLoading('focus-complete');
+    try {
+      const { data } = await api.tool('soly.work.checkpoint', { sessionId: 'active', taskId, status: 'done', note: 'اكتملت من مركز سولي' }, ['project:work:write']);
+      setWorkSummary((data as any)?.result?.summary || null);
+    } catch (caught) {
+      showError(caught);
+    } finally {
+      setLoading('');
+    }
+  }
+
+  async function blockFocusTask() {
+    const taskId = workSummary?.nextAction?.id;
+    if (!taskId) return;
+    setLoading('focus-block');
+    try {
+      const { data } = await api.tool('soly.work.checkpoint', {
+        sessionId: 'active',
+        taskId,
+        status: 'blocked',
+        blocker: focusBlocker || 'المسار الحالي متعطل',
+        alternatives: ['انتقل لأول مهمة مستقلة متاحة ثم ارجع للعائق لاحقًا'],
+        nextAction: 'continue-next-independent-task',
+      }, ['project:work:write']);
+      setWorkSummary((data as any)?.result?.summary || null);
+      setFocusBlocker('');
+    } catch (caught) {
+      showError(caught);
+    } finally {
+      setLoading('');
+    }
   }
 
   function resultToAudio(result: VoiceResult, label: string, blindCode?: string): AudioResult {
@@ -731,10 +817,24 @@ function App() {
         <div className='divider' /><div className='action-row'><button className='secondary grow' onClick={exportProject}>⬇️ نسخة احتياطية Project DNA</button><label className='secondary grow import-button'>⬆️ استرجاع نسخة<input type='file' accept='application/json' onChange={event => importProject(event.target.files?.[0] || null)} /></label></div>
       </section>}
 
+      {tab === 'control' && <section className='panel'>
+        <div className='section-head'><div><p className='kicker'>SOLY FOCUS CONTROL</p><h2>حالة الشغل محفوظة والخطوة الجاية واضحة</h2></div><span className={workSummary?.state === 'completed' ? 'badge good-badge' : 'badge gold'}>{workSummary?.state === 'completed' ? 'مكتمل' : workSummary ? 'شغال' : 'ابدأ جلسة'}</span></div>
+        <p className='hint'>لو مسار اتعطل، سجله كـ Blocked وكمل أول مهمة مستقلة متاحة. المركز لا ينشر ولا يدفع ولا يغيّر أسرار تلقائيًا.</p>
+        <label className='field'>هدف الجلسة<textarea value={focusGoal} onChange={event => setFocusGoal(event.target.value)} /></label>
+        <div className='action-row'><button className='primary grow' disabled={Boolean(loading)} onClick={startFocusSession}>🧠 ابدأ/أعد بناء جلسة المتابعة</button><button className='secondary grow' disabled={Boolean(loading)} onClick={loadFocusStatus}>↻ تحديث الحالة</button></div>
+        {workSummary && <div className='lux-card'>
+          <div className='section-head'><h3>التقدم</h3><span className='badge'>{workSummary.counts?.done || 0} تم • {workSummary.counts?.blocked || 0} متعطل • {workSummary.counts?.pending || 0} منتظر</span></div>
+          <p><strong>الهدف:</strong> {workSummary.goal}</p>
+          {workSummary.nextAction ? <div className='recovery-card'><strong>الخطوة التالية</strong><p>{workSummary.nextAction.title}</p><div className='action-row'><button className='primary grow' disabled={Boolean(loading)} onClick={completeFocusTask}>✓ خلصت — هات اللي بعدها</button></div><label className='field'>لو المسار متعطل<input value={focusBlocker} onChange={event => setFocusBlocker(event.target.value)} placeholder='مثال: Provider quota / صلاحية ناقصة' /></label><button className='secondary wide' disabled={Boolean(loading)} onClick={blockFocusTask}>⤴ سجّل العائق وكمل مسار تاني</button></div> : <p className='hint success'>مفيش مهام Pending أو Running في الجلسة الحالية.</p>}
+          {workSummary.blockedTasks?.length ? <div className='rights-list'>{workSummary.blockedTasks.map(item => <article key={item.id}><div><strong>{item.title}</strong><span>{item.blocker || 'عائق مسجل'}</span></div><em className='right-review'>Blocked</em></article>)}</div> : null}
+          <p className='hint'>آخر تحديث: {workSummary.updatedAt || 'غير معروف'}</p>
+        </div>}
+      </section>}
+
       {loading && <div className='floating-status' aria-label='جاري التنفيذ'><span className='spinner' /></div>}
       {message && <div className='message' role='alert'>{message}{message === 'تعذر التنفيذ' && <button className='mini' onClick={() => setMessage('')}>إعادة</button>}</div>}
 
-      <footer>صوت توتو 6.0</footer>
+      <footer>Toto Kids Studio • Soly Focus 7.15 dev</footer>
     </main>
   );
 }
