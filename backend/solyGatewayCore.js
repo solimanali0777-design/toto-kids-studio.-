@@ -1,4 +1,5 @@
 import { getToolContract, validateToolArgs } from './toolContracts.js';
+import { executeWithRecovery } from './selfRepairLoop.mjs';
 const idemCache=new Map();
 const breaker=new Map();
 export class GatewayError extends Error{constructor(code,message,status=400){super(message);this.code=code;this.status=status;}}
@@ -17,10 +18,29 @@ export async function executeToolRequest(request,{scopes=[],confirmed=false,esti
   if(contract.idempotent&&idempotencyKey&&idemCache.has(idempotencyKey))return idemCache.get(idempotencyKey);
   const exec=executors[toolId]; if(typeof exec!=='function')throw new GatewayError('adapter_unavailable','Tool adapter is not connected',503);
   const started=Date.now();
+  const externalWrite=contract.requiresConfirmation==='when_external_write';
+  const paid=Number(estimatedCostUsd)>0;
+  const runOnce=()=>Promise.race([
+    exec(args,{timeoutMs:contract.timeoutMs}),
+    new Promise((_,rej)=>setTimeout(()=>rej(new GatewayError('timeout','Tool timed out',504)),contract.timeoutMs)),
+  ]);
   try{
-    const result=await Promise.race([exec(args,{timeoutMs:contract.timeoutMs}),new Promise((_,rej)=>setTimeout(()=>rej(new GatewayError('timeout','Tool timed out',504)),contract.timeoutMs))]);
+    const recovery=await executeWithRecovery(runOnce,{
+      maxAttempts:2,
+      retryDelayMs:180,
+      riskLevel:contract.riskLevel,
+      idempotent:Boolean(contract.idempotent),
+      externalWrite,
+      paid,
+    });
     recordSuccess(toolId);
-    const envelope={ok:true,toolId,result,audit:{durationMs:Date.now()-started,riskLevel:contract.riskLevel,estimatedCostUsd:Number(estimatedCostUsd||0)}};
+    const envelope={ok:true,toolId,result:recovery.result,audit:{durationMs:Date.now()-started,riskLevel:contract.riskLevel,estimatedCostUsd:Number(estimatedCostUsd||0),recovered:Boolean(recovery.recovered),recoveryRoute:recovery.route,recoveryEvents:recovery.events}};
     if(contract.idempotent&&idempotencyKey)idemCache.set(idempotencyKey,envelope); return envelope;
-  }catch(error){recordFailure(toolId);if(error instanceof GatewayError)throw error;throw new GatewayError(error.code||'adapter_error',String(error?.message||error),Number(error?.status||502));}
+  }catch(error){
+    recordFailure(toolId);
+    if(error instanceof GatewayError)throw error;
+    const wrapped=new GatewayError(error.code||'adapter_error',String(error?.message||error),Number(error?.status||error?.cause?.status||502));
+    wrapped.repair=error?.repair||null;
+    throw wrapped;
+  }
 }
