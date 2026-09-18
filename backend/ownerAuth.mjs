@@ -39,6 +39,8 @@ export function buildOwnerAuth({
 } = {}) {
   const token = text(ownerToken);
   const isDisabled = Boolean(disabled);
+  const weak = Boolean(token) && token.length < 24;
+  const configured = Boolean(token) && !weak;
 
   const sessionValue = token
     ? createHmac('sha256', token).update(SESSION_LABEL).digest('base64url')
@@ -57,14 +59,20 @@ export function buildOwnerAuth({
 
   function authenticated(headers = {}) {
     if (isDisabled) return true;
-    if (!token) return false;
+    if (!configured) return false;
     return constantTimeEqual(bearerFrom(headers), token)
       || constantTimeEqual(cookieFrom(headers), sessionValue);
   }
 
   function assertAuthenticated(headers = {}) {
     if (isDisabled) return true;
-    if (!token) {
+    if (weak) {
+      throw Object.assign(new Error('Owner token must be at least 24 characters'), {
+        code: 'owner_auth_weak',
+        status: 503,
+      });
+    }
+    if (!configured) {
       throw Object.assign(new Error('Owner authentication is not configured on the server'), {
         code: 'owner_auth_not_configured',
         status: 503,
@@ -81,7 +89,13 @@ export function buildOwnerAuth({
 
   function login(candidate) {
     if (isDisabled) return { ok: true, bypassed: true };
-    if (!token) {
+    if (weak) {
+      throw Object.assign(new Error('Owner token must be at least 24 characters'), {
+        code: 'owner_auth_weak',
+        status: 503,
+      });
+    }
+    if (!configured) {
       throw Object.assign(new Error('Owner authentication is not configured on the server'), {
         code: 'owner_auth_not_configured',
         status: 503,
@@ -112,7 +126,8 @@ export function buildOwnerAuth({
   }
 
   return {
-    configured: Boolean(token),
+    configured,
+    weak,
     disabled: isDisabled,
     cookieName,
     authenticated,
