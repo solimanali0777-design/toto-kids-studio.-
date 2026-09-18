@@ -195,26 +195,39 @@ async function candidateModels(apiKey: string, kind: ModelKind, preferred: strin
   }
 }
 
-async function postGemini(apiKey: string, model: string, payload: unknown, version = 'v1beta') {
+async function postGemini(
+  apiKey: string,
+  model: string,
+  payload: unknown,
+  version = 'v1beta',
+  timeoutMs = 40000,
+  maxAttempts = 3,
+) {
   const endpoint = `https://generativelanguage.googleapis.com/${version}/models/${model}:generateContent`;
   let lastStatus = 500;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  const attempts = Math.min(4, Math.max(1, Math.round(maxAttempts)));
+  const requestTimeout = Math.min(60000, Math.max(5000, Math.round(timeoutMs)));
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(requestTimeout),
       });
       lastStatus = response.status;
       if (response.ok) return response.json() as Promise<any>;
-      if (!retryableStatuses.has(response.status) || attempt === 3) break;
+      if (!retryableStatuses.has(response.status) || attempt === attempts - 1) break;
       const retryAfter = Number(response.headers.get('retry-after') || 0);
-      const delay = retryAfter > 0 ? retryAfter * 1000 : Math.min(8000, 650 * (2 ** attempt) + Math.floor(Math.random() * 450));
+      const delay = retryAfter > 0
+        ? Math.min(12000, retryAfter * 1000)
+        : Math.min(6000, 700 * (2 ** attempt) + Math.floor(Math.random() * 450));
       await sleep(delay);
-    } catch {
-      lastStatus = 503;
-      if (attempt === 3) break;
-      await sleep(Math.min(8000, 650 * (2 ** attempt) + Math.floor(Math.random() * 450)));
+    } catch (caught) {
+      lastStatus = (caught as { name?: string })?.name === 'TimeoutError' ? 504 : 503;
+      if (attempt === attempts - 1) break;
+      await sleep(Math.min(6000, 700 * (2 ** attempt) + Math.floor(Math.random() * 450)));
     }
   }
   const failure = new Error(`gemini_http_${lastStatus}`);
@@ -244,7 +257,7 @@ async function postTextGemini(apiKey: string, payload: unknown) {
   let lastError: unknown = null;
   for (const model of models) {
     try {
-      const result = await postGemini(apiKey, model, payload);
+      const result = await postGemini(apiKey, model, payload, 'v1beta', 18000, 2);
       return { result, model };
     } catch (caught) {
       lastError = caught;
