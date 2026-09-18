@@ -239,7 +239,7 @@ function App() {
     return String(data?.message || data?.error || (value as { message?: string })?.message || '').trim();
   }
 
-  async function recoverCall(label: string, runner: () => Promise<{ data: any }>, attempts = 3) {
+  async function recoverCall(label: string, runner: () => Promise<{ data: any }>, attempts = 2) {
     let lastError: unknown = null;
     const retryable = new Set([408, 425, 429, 499, 500, 502, 503, 504]);
     for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -426,6 +426,26 @@ function App() {
     return { text, voice, age, character, style, childStrength, expression, speed, pitch, energy, directorNotes, pronunciation: dictionary, dialect: selectedDialect.prompt, ...extra };
   }
 
+  function browserVoicePreview(script: string) {
+    if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') return false;
+    try {
+      const utterance = new SpeechSynthesisUtterance(script);
+      const available = window.speechSynthesis.getVoices();
+      const preferred = available.find(item => item.lang.toLowerCase().startsWith('ar-eg'))
+        || available.find(item => item.lang.toLowerCase().startsWith('ar'));
+      if (preferred) utterance.voice = preferred;
+      utterance.lang = 'ar-EG';
+      utterance.rate = Math.min(1.18, Math.max(0.82, speed));
+      utterance.pitch = Math.min(1.7, Math.max(0.7, 1 + pitch * 0.08));
+      utterance.volume = 1;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function checkQuality(itemId: string, sourceText = text) {
     const item = audioResults.find(result => result.id === itemId);
     if (!item) return;
@@ -451,19 +471,28 @@ function App() {
   async function generateVoice() {
     clearAudio(); setMessage(''); setLoading('بنجهّز Voice DNA ونمثل الجملة...');
     try {
-      const response = await recoverPost('/api/tts', voicePayload());
+      const response = await recoverPost('/api/tts', voicePayload(), 'توليد الصوت');
       const result = response.data as VoiceResult;
       const audio = resultToAudio(result, currentProfile?.name || 'طفل');
       setAudioResults([audio]);
       if (autoQa) {
         setLoading('الصوت جاهز، بنعمل فحص نطق تلقائي...');
-        const qualityResponse = await recoverPost('/api/quality-check', {
-          text, pcmBase64: result.pcmBase64, sampleRate: result.sampleRate, channels: result.channels, bitDepth: result.bitDepth, pronunciation: dictionary,
-        });
-        setAudioResults([{ ...audio, quality: qualityResponse.data as VoiceQuality }]);
+        try {
+          const qualityResponse = await recoverPost('/api/quality-check', {
+            text, pcmBase64: result.pcmBase64, sampleRate: result.sampleRate, channels: result.channels, bitDepth: result.bitDepth, pronunciation: dictionary,
+          }, 'فحص النطق');
+          setAudioResults([{ ...audio, quality: qualityResponse.data as VoiceQuality }]);
+        } catch {
+          setMessage('الصوت اتولد بنجاح، لكن فحص النطق التلقائي اتأجل مؤقتًا. الملف نفسه محفوظ وجاهز.');
+        }
       }
     } catch (caught) {
-      showError(caught);
+      const status = errorStatus(caught);
+      if ([404, 408, 425, 429, 499, 500, 502, 503, 504].includes(status) && browserVoicePreview(text)) {
+        setMessage('محرك الصوت الخارجي مش متاح دلوقتي؛ شغّلت معاينة ar-EG من الجهاز بدل الشاشة الفاضية. المعاينة مؤقتة وليست ملف التصدير النهائي.');
+      } else {
+        showError(caught);
+      }
     } finally { setLoading(''); }
   }
 
