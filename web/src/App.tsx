@@ -559,9 +559,10 @@ function App() {
       const response = await recoverPost('/api/music', {
         topic: musicTopic, mode: musicMode, mood: musicMood, vocals: musicVocals, lyricsHint: lyricsDraft, songType, bibleSummary: bibleSummary(bible), dialect: selectedDialect.prompt,
       });
-      const data = response.data as { url: string; lyrics: string; model: string; degraded?: boolean };
+      const data = response.data as { url: string; lyrics: string; model: string; degraded?: boolean; emergencyAudio?: boolean };
       setMusicUrl(data.url || ''); setLyrics(data.lyrics || '');
-      if (data.degraded) setMessage('كملت الشغل بخطة كلمات وتلحين احتياطية بدل إيقاف المشروع؛ الصوت الموسيقي نفسه يتولد عند رجوع أحد محركات الموسيقى.');
+      if (data.degraded && data.emergencyAudio) setMessage('محرك الموسيقى الخارجي اتعطل، فـSoly ولّد موسيقى WAV محلية أصلية فعلية وكمل المشروع بدل ما يوقف.');
+      else if (data.degraded) setMessage('المحرك الخارجي اتعطل؛ تم الحفاظ على الكلمات والخطة لحد رجوع الصوت.');
     } catch (caught) { showError(caught); } finally { setLoading(''); }
   }
 
