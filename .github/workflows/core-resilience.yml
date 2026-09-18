@@ -32,5 +32,8 @@ jobs:
           node --check backend/selfRepairLoop.mjs
           node --check backend/modelRouter.mjs
           node --check backend/educationPolicy.mjs
+          node --check backend/toolContracts.js
+          node --check backend/solyGatewayCore.js
+          node --check backend/solyGatewayServer.mjs
       - name: Run resilience tests
         run: node --test tests/resilience.test.mjs
