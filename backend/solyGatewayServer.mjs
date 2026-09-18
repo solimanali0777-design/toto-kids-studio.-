@@ -12,6 +12,7 @@ import { buildLipSyncPlan } from './lipSyncPlanner.mjs';
 import { createWorkSession, getWorkSession, checkpointWork, summarizeWorkSession } from './workContinuity.mjs';
 import { selectModel } from './modelRouter.mjs';
 import { evaluateEducationalPlan } from './educationPolicy.mjs';
+import { planShortForm } from './shortFormPlanner.mjs';
 import { durableConfigured, durableGet, durablePut, durableBlobGet } from './durableStore.mjs';
 import { handler as appdeployCompatHandler } from './appdeployCompatApi.mjs';
 
@@ -45,6 +46,7 @@ const adapters={
   'soly.work.checkpoint':async args=>({adapter:'internal-work-continuity',...await checkpointWork(args)}),
   'soly.model.route':async args=>({adapter:'internal-model-router',...selectModel(args)}),
   'toto.education.review':async args=>({adapter:'internal-education-policy',...evaluateEducationalPlan(args)}),
+  'toto.shortform.plan':async args=>({adapter:'internal-shortform-planner',...planShortForm(args)}),
   ...createAccountAdapters(),
   'workspace.asset.read':async args=>readWorkspaceAsset(args),
   'workspace.asset.persist':async args=>persistWorkspaceAsset(args),
