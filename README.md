@@ -1,8 +1,11 @@
-# Toto Kids Studio 7.14.1 — Canonical Railway Source
+# Toto Kids Studio 7.15 Alpha — Canonical Source + Resilience Development
 
-This private repository is the canonical **Railway deployment source** for Toto Kids Studio / Soly Gateway 7.14.1.
+This repository contains the canonical **Railway deployment source** restored from Toto Kids Studio / Soly Gateway 7.14.1, plus the reviewed 7.15 resilience development.
 
-- Version: `7.14.1-alpha.1`
+> Repository visibility note: GitHub currently reports this repository as **public**. No runtime secret, API key, OAuth token, private key, or credential value may be committed here.
+
+- Canonical production baseline: `7.14.1-alpha.1`
+- Current development version: `7.15.0-alpha.1`
 - Clean Recovery v2 SHA256: `4a905092d2c27845a6a40dc02bd292574b051ae1506370c629d66b4ff66494af`
 - Verified live Railway backend archive SHA256: `d3768c93c144832f58f208a8d0bac42d03ed3f0e18bd0194d5020c82508b910e`
 - Verified live Railway runtime archive SHA256: `9f050337b2095eb7e8108d9475da39788829ada0f92435c489eac7469386125c`
@@ -23,6 +26,12 @@ The source used to reproduce the Railway gateway is readable and reviewable:
 - the exact four transitive runtime modules under `src/services/` required by the gateway
 
 The full 243-file Studio workspace is preserved separately in the verified CLEAN RECOVERY v2 package. Historical archives, temporary connector checks, deploy-trigger files and the old Base64 bootstrap bundle are intentionally excluded from this deployment repository.
+
+## 7.15 development safety
+
+The 7.15 branch adds durable work continuity, bounded self-repair for safe idempotent tasks, educational/originality checks, cost-aware model routing infrastructure, vertical short-form planning, stronger CI, and the Soly Focus Control UI.
+
+Self-repair is deliberately bounded: it must not auto-retry paid work, external writes, permission failures, privacy blocks, schema errors, or secret-vault failures.
 
 ## Deployment safety
 
