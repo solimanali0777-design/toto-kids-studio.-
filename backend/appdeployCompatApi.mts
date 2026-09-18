@@ -443,7 +443,7 @@ export const handler = router({
           music: names.includes('lyria-3.5') ? 'lyria-3.5' : names.find((name: string) => name.includes('lyria')) || null,
           video: names.includes('veo-3.1-lite-generate-preview') ? 'veo-3.1-lite-generate-preview' : names.find((name: string) => name.includes('veo')) || null,
         },
-        resilience: { platformTextFallback: true, platformImageFallback: true, browserVoiceFallback: true, retryLayers: 4, dynamicModelRouting: true },
+        resilience: { platformTextFallback: false, platformImageFallback: false, alternateGeminiModels: true, localEmergencyMusic: true, browserVoicePreviewFallback: true, retryLayers: 3, dynamicModelRouting: true },
       });
     } catch (caught) {
       console.warn('Capabilities failed', (caught as any)?.status || 'unknown');
