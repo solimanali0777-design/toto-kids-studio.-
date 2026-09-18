@@ -212,14 +212,28 @@ function App() {
     setAudioResults([]);
   }
 
-  async function recoverCall(_label: string, runner: () => Promise<{ data: any }>, attempts = 3) {
+  function errorStatus(value: unknown) {
+    return Number((value as { status?: number })?.status || 0);
+  }
+
+  function errorMessage(value: unknown) {
+    const data = (value as { data?: { message?: string; error?: string } })?.data;
+    return String(data?.message || data?.error || (value as { message?: string })?.message || '').trim();
+  }
+
+  async function recoverCall(label: string, runner: () => Promise<{ data: any }>, attempts = 3) {
     let lastError: unknown = null;
+    const retryable = new Set([408, 425, 429, 499, 500, 502, 503, 504]);
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
         return await runner();
       } catch (caught) {
         lastError = caught;
-        if (attempt < attempts - 1) await new Promise(resolve => setTimeout(resolve, 650 * (2 ** attempt) + Math.floor(Math.random() * 350)));
+        const status = errorStatus(caught);
+        if (!retryable.has(status) || attempt >= attempts - 1) break;
+        const base = status === 429 ? 1800 : 700;
+        setLoading(`${label} — محاولة استرجاع ${attempt + 2}/${attempts}`);
+        await new Promise(resolve => setTimeout(resolve, base * (2 ** attempt) + Math.floor(Math.random() * 400)));
       }
     }
     throw lastError || new Error('recovery_exhausted');
@@ -229,8 +243,31 @@ function App() {
     return recoverCall(label, () => api.post(path, body));
   }
 
-  function showError(_value: unknown) {
-    setMessage('تعذر التنفيذ');
+  function showError(value: unknown) {
+    const status = errorStatus(value);
+    const detail = errorMessage(value);
+    if (status === 401) {
+      setOwnerAuth(current => ({ ...(current || {}), authenticated: false }));
+      setMessage('جلسة المالك مقفولة. افتحها من أعلى الصفحة وكمل.');
+      return;
+    }
+    if (status === 403) {
+      setMessage(detail || 'المحرك الحالي مش مسموح للمفتاح المستخدم. هنحتاج محرك بديل أو صلاحية صحيحة.');
+      return;
+    }
+    if (status === 404) {
+      setMessage('اتكشف عدم تطابق بين نسخة الواجهة والسيرفر. حدّث الصفحة؛ ولو استمر، الإصدار المنشور محتاج مزامنة.');
+      return;
+    }
+    if (status === 429) {
+      setMessage('ضغط/حصة مؤقتة على مزود التوليد. جرّبنا الاسترجاع تلقائيًا؛ المهمة نفسها محفوظة وممكن تتعاد بعد هدوء الحصة.');
+      return;
+    }
+    if ([408, 499, 502, 503, 504].includes(status)) {
+      setMessage(detail || 'المزود اتأخر أو غير متاح مؤقتًا. البرنامج حاول الاسترجاع تلقائيًا من غير ما يضيّع إعداداتك.');
+      return;
+    }
+    setMessage(detail || 'حصل خطأ غير متوقع، واتحفظت إعداداتك الحالية.');
   }
 
   async function checkOwnerAuth() {
